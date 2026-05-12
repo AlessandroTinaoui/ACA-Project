@@ -258,3 +258,4 @@ include/mlp_model.h
 plots/*
 plots/model_metrics/metrics.csv
 !src_inference/model
+gem5
