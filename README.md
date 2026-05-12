@@ -34,7 +34,84 @@ Per `src_inference` servono anche:
 
 - `gcc` per build host
 - `riscv64-linux-gnu-gcc` per build RISC-V
-- `gem5` compilato in `../gem5/build/RISCV/gem5.opt`
+- `gem5` compilato in `gem5/build/RISCV/gem5.opt`
+
+## Compilare gem5 per RISC-V
+
+I target gem5 di questo repository si aspettano il binario qui:
+
+```text
+gem5/build/RISCV/gem5.opt
+```
+
+Quindi, dalla root di `ACA-Project`, `gem5` deve essere presente come submodule/cartella interna:
+
+```text
+./gem5
+```
+
+### 1. Installare le dipendenze di build
+
+Su Ubuntu/Debian, una base ragionevole e`:
+
+```bash
+sudo apt update
+sudo apt install -y build-essential git python3-dev python3-venv scons \
+  m4 zlib1g zlib1g-dev libprotobuf-dev protobuf-compiler \
+  libgoogle-perftools-dev libboost-all-dev pkg-config
+```
+
+### 2. Entrare nella repo gem5
+
+```bash
+cd gem5
+```
+
+### 3. Installare le dipendenze Python di gem5
+
+Se vuoi usare un virtualenv dedicato:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+### 4. Compilare il target RISC-V
+
+Build ottimizzata:
+
+```bash
+scons build/RISCV/gem5.opt -j"$(nproc)"
+```
+
+Build debug, se ti serve:
+
+```bash
+scons build/RISCV/gem5.debug -j"$(nproc)"
+```
+
+### 5. Verificare il binario
+
+```bash
+ls -l build/RISCV/gem5.opt
+```
+
+Poi torna nella root di questo progetto:
+
+```bash
+cd ..
+```
+
+Da qui i target come:
+
+```bash
+make gem5-kan-cache
+make gem5-mlp
+make gem5-all
+```
+
+troveranno automaticamente `gem5/build/RISCV/gem5.opt`.
 
 ## Makefile di Root
 
@@ -387,4 +464,4 @@ src_inference/scripts/plot_model_metrics.py
 
 - Gli script Python in `src_inference/scripts` ora risolvono i path rispetto a `src_inference`, quindi funzionano anche lanciati dalla root del repository.
 - Il `Makefile` di root non sostituisce i singoli script: li incapsula.
-- Se `gem5.opt` non esiste in `../gem5/build/RISCV/`, i target gem5 falliranno fino a quando non compili gem5.
+- Se `gem5.opt` non esiste in `gem5/build/RISCV/`, i target gem5 falliranno fino a quando non compili gem5.

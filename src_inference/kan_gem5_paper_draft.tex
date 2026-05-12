@@ -1,0 +1,226 @@
+\documentclass[conference]{IEEEtran}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amsfonts}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{hyperref}
+
+\lstset{
+  basicstyle=\ttfamily\footnotesize,
+  breaklines=true,
+  frame=single,
+  columns=fullflexible,
+  keepspaces=true
+}
+
+\title{Deployment e Ottimizzazione di una Kolmogorov-Arnold Network su RISC-V simulato con gem5}
+
+\author{%
+\IEEEauthorblockN{Giovanni Vaccaro}
+\IEEEauthorblockA{Progetto KAN su RISC-V/gem5\\
+Email: inserire email}
+}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Questo lavoro presenta il deployment di una Kolmogorov-Arnold Network (KAN) per regressione monodimensionale su una piattaforma RISC-V simulata con gem5. Il modello viene allenato esternamente in Python, esportato in formato JSON, convertito in header C e compilato come binario RISC-V statico. L'inferenza viene eseguita in gem5 in modalita' syscall emulation con CPU timing, cache L1/L2 e memoria DDR3 simulata. Il contributo principale e' l'analisi della pipeline software-hardware e l'ottimizzazione della valutazione delle B-spline: la formulazione ricorsiva di Cox-de Boor viene sostituita da una versione iterativa basata su programmazione dinamica. Infine, vengono discusse estensioni future orientate all'hardware, tra cui quantizzazione, LUT per le basi spline, scratchpad memory e istruzioni custom RISC-V per dot product packed INT8.
+\end{abstract}
+
+\section{Introduzione}
+Le Kolmogorov-Arnold Networks sono reti neurali in cui la non-linearita' non e' concentrata in una funzione di attivazione fissa applicata ai nodi, ma in funzioni univariate apprese sugli archi. Questa caratteristica rende l'inferenza diversa da quella di un MLP tradizionale: il costo dominante non e' soltanto una moltiplicazione matrice-vettore, ma la valutazione ripetuta di funzioni spline associate agli edge.
+
+L'obiettivo del progetto e' duplice. Primo, eseguire correttamente l'inferenza di una KAN allenata in Python su un binario RISC-V simulato con gem5. Secondo, analizzare e ottimizzare la computazione dal punto di vista hardware, con particolare attenzione a memoria, cache, rappresentazione dei coefficienti spline e struttura della valutazione B-spline.
+
+\section{Background matematico}
+\subsection{Struttura di una KAN}
+In un layer KAN, l'output del nodo $j$ puo' essere scritto come somma di funzioni univariate applicate agli input:
+\begin{equation}
+    y_j = \sum_{i=1}^{n} \phi_{i,j}(x_i),
+\end{equation}
+dove $x_i$ e' l'input del layer e $\phi_{i,j}$ e' la funzione appresa associata all'arco tra il nodo di input $i$ e il nodo di output $j$.
+
+Nel caso implementato, la rete approssima la funzione target
+\begin{equation}
+    f(x) = \sin(2\pi x) + 0.35\sin(10\pi x),
+\end{equation}
+su punti uniformemente distribuiti in $[0,1]$.
+
+\subsection{Parametrizzazione tramite B-spline}
+Ogni funzione edge e' rappresentata come combinazione lineare di B-spline:
+\begin{equation}
+    \phi_{i,j}(x) = \sum_{k=0}^{m-1} c_{i,j,k} B_{k,p}(x),
+\end{equation}
+dove $c_{i,j,k}$ sono i coefficienti appresi, $B_{k,p}$ e' la $k$-esima B-spline di grado $p$, e $p=3$ nel caso cubico.
+
+La ricorrenza di Cox-de Boor e' definita da:
+\begin{equation}
+B_{i,0}(x) =
+\begin{cases}
+1, & t_i \le x < t_{i+1},\\
+0, & \text{altrimenti},
+\end{cases}
+\end{equation}
+\begin{equation}
+B_{i,p}(x) =
+\frac{x-t_i}{t_{i+p}-t_i}B_{i,p-1}(x)
++
+\frac{t_{i+p+1}-x}{t_{i+p+1}-t_{i+1}}B_{i+1,p-1}(x).
+\end{equation}
+
+Per una spline cubica, al piu' quattro basi sono attive localmente. Se $x$ cade nell'intervallo $[t_k,t_{k+1})$, il valore della funzione puo' essere calcolato combinando solo una finestra locale di coefficienti:
+\begin{equation}
+    \phi(x) \approx c_0 b_0(x) + c_1 b_1(x) + c_2 b_2(x) + c_3 b_3(x).
+\end{equation}
+Questa struttura e' rilevante per l'hardware, perche' puo' essere trasformata in un dot product a quattro elementi.
+
+\section{Pipeline software e simulazione}
+\subsection{Esportazione del modello}
+Il training non avviene nella repository. Il modello viene allenato esternamente e salvato come JSON. Il file contiene topologia, knot vector, control points, scale factors e mask. Lo script \texttt{json\_to\_header.py} genera \texttt{include/kan\_model.h}, che contiene array C statici con i parametri del modello.
+
+I dati principali generati sono:
+\begin{itemize}
+    \item \texttt{KAN\_LAYER\_KNOTS}: knot vector per ogni layer e input;
+    \item \texttt{KAN\_LAYER\_CONTROL\_POINTS}: coefficienti spline per ogni edge;
+    \item \texttt{KAN\_LAYER\_SCALE\_SP}: scala della componente spline;
+    \item \texttt{KAN\_LAYER\_MASK}: maschera degli edge attivi;
+    \item dimensioni dei layer e metadati globali.
+\end{itemize}
+
+Poiche' questi array sono dichiarati \texttt{static const}, vengono incorporati nel binario RISC-V. Durante l'esecuzione non viene letto alcun JSON: il binario contiene gia' tutti i parametri.
+
+\subsection{Compilazione ed esecuzione in gem5}
+Lo script di build compila i file \texttt{main.c}, \texttt{bspline.c} e \texttt{kan\_inference.c} con cross-compiler RISC-V e linking statico:
+\begin{lstlisting}[language=bash]
+riscv64-linux-gnu-gcc -O2 -static -Wall -Wextra -Iinclude \
+  src/main.c src/bspline.c src/kan_inference.c \
+  -lm -o build/riscv/kan_demo_riscv
+\end{lstlisting}
+
+La simulazione usa gem5 in modalita' syscall emulation. La configurazione principale include una CPU timing RISC-V, una cache L1 istruzioni, una cache L1 dati, una L2 privata e una memoria DDR3 simulata.
+
+\subsection{Pipeline di inferenza}
+Il programma principale genera $N$ input uniformemente distribuiti in $[0,1]$. Per ogni input calcola:
+\begin{enumerate}
+    \item predizione KAN tramite \texttt{kan\_infer(x)};
+    \item valore target tramite la funzione analitica;
+    \item errore, errore assoluto, MSE, MAE e checksum.
+\end{enumerate}
+
+All'interno di \texttt{kan\_infer}, due buffer locali sullo stack, \texttt{current} e \texttt{next}, memorizzano le attivazioni del layer corrente e successivo. Per ogni layer, per ogni nodo di output, il codice scorre tutti gli input del layer. Se la mask dell'edge e' zero, l'edge viene saltato. Altrimenti viene chiamata \texttt{bspline\_eval} usando l'attivazione corrente, i knots dell'input corrente e i control points dell'edge.
+
+La pipeline logica e':
+\begin{lstlisting}
+current[0] = x
+for layer:
+  for output_index:
+    sum = 0
+    for input_index:
+      if mask == 0: continue
+      spline = bspline_eval(current[input_index], knots, control_points)
+      edge_value = scale_sp * spline
+      sum += mask * edge_value
+    next[output_index] = sum
+  current = next
+return current[0]
+\end{lstlisting}
+
+\subsection{Dove sono caricati i dati}
+I coefficienti e i knots sono parte della sezione read-only del binario RISC-V. In gem5, quando il processo viene caricato in SE mode, codice, dati read-only, stack e heap vengono mappati nello spazio di memoria del processo simulato. Gli accessi ai parametri avvengono tramite normali load RISC-V. La gerarchia attraversata e':
+\begin{equation}
+\text{registro} \leftarrow \text{L1D} \leftarrow \text{L2} \leftarrow \text{DDR3 simulata}.
+\end{equation}
+Gli array \texttt{current} e \texttt{next} sono temporanei locali, quindi risiedono nello stack del processo e sono anch'essi serviti dalla gerarchia cache/memoria. Non e' presente una scratchpad memory esplicita nella versione corrente.
+
+\section{Fix e ottimizzazione delle B-spline}
+\subsection{Versione precedente: valutazione ricorsiva}
+Nella versione precedente, \texttt{bspline\_eval} calcolava ogni base chiamando ripetutamente \texttt{bspline\_basis}. La funzione \texttt{bspline\_basis} implementava direttamente la ricorrenza di Cox-de Boor, richiamando se stessa su grado inferiore:
+\begin{lstlisting}[language=C]
+y += control_points[i] * bspline_basis(
+    i, degree, x, knots,
+    num_knots, num_control_points, x_max);
+\end{lstlisting}
+
+Questa scelta e' corretta matematicamente, ma inefficiente: molte sotto-basi vengono ricalcolate piu' volte. Per ogni control point si ricostruisce parte dello stesso albero ricorsivo, aumentando numero di chiamate, branch, overhead di stack e istruzioni eseguite.
+
+\subsection{Versione ottimizzata: dynamic programming iterativo}
+Nel fix, \texttt{bspline\_eval} costruisce prima tutte le basi di grado zero e poi sale iterativamente fino al grado richiesto. Vengono usati due array locali:
+\begin{lstlisting}[language=C]
+float prev[num_intervals];
+float curr[num_intervals];
+\end{lstlisting}
+\texttt{prev} contiene le basi del grado precedente, mentre \texttt{curr} contiene quelle del grado corrente. Per ogni grado, il codice applica la ricorrenza usando i valori gia' calcolati invece di richiamare ricorsivamente la funzione.
+
+La nuova struttura e':
+\begin{lstlisting}[language=C]
+for (int i = 0; i < num_intervals; ++i)
+    prev[i] = (knots[i] <= x && x < knots[i+1]) ? 1.0f : 0.0f;
+
+for (int current_degree = 1; current_degree <= degree; ++current_degree) {
+    for (int i = 0; i < basis_count; ++i) {
+        curr[i] = left + right;
+    }
+    for (int i = 0; i < basis_count; ++i)
+        prev[i] = curr[i];
+}
+
+for (int i = 0; i < num_control_points; ++i)
+    y += control_points[i] * prev[i];
+\end{lstlisting}
+
+\subsection{Perche' e' migliore}
+Il fix migliora il codice per quattro motivi principali:
+\begin{enumerate}
+    \item elimina la ricorsione, riducendo overhead di chiamata e uso dello stack;
+    \item evita il ricalcolo delle stesse basi intermedie;
+    \item rende i loop piu' regolari e quindi piu' favorevoli a cache, compilatore e futura vettorizzazione;
+    \item prepara il codice a ulteriori ottimizzazioni come LUT, calcolo locale delle sole basi attive e packed SIMD.
+\end{enumerate}
+
+Il miglioramento non cambia il modello matematico: calcola la stessa ricorrenza di Cox-de Boor, ma in ordine bottom-up invece che top-down ricorsivo.
+
+\section{Sviluppi hardware-oriented}
+\subsection{Quantizzazione}
+Una futura estensione e' la quantizzazione dei coefficienti spline. Invece di rappresentare tutti i coefficienti in floating point, si puo' usare INT8 o INT16:
+\begin{equation}
+    q = \mathrm{round}\left(\frac{x}{s}\right), \qquad \hat{x}=s q.
+\end{equation}
+L'accumulo puo' restare in INT32 o INT64 per evitare overflow. La valutazione locale di una spline cubica diventa un prodotto tra coefficienti quantizzati e basi quantizzate.
+
+\subsection{LUT per le basi spline}
+Poiche' le basi dipendono dalla posizione locale di $x$ nell'intervallo, e non dall'edge specifico, si puo' precomputare una lookup table:
+\begin{equation}
+    \texttt{basis\_lut[frac][4]} = [b_0,b_1,b_2,b_3].
+\end{equation}
+L'edge cambia solo i coefficienti $c_0,\ldots,c_3$. Quindi il runtime puo' caricare le basi dalla LUT e combinare i coefficienti dell'edge.
+
+\subsection{Scratchpad memory}
+Una scratchpad software-managed puo' contenere:
+\begin{itemize}
+    \item basis LUT;
+    \item tile di coefficienti packed;
+    \item tile di input quantizzati;
+    \item accumulatori di output.
+\end{itemize}
+A differenza della cache, la scratchpad non usa replacement automatico: il software decide esplicitamente quali blocchi caricare e quando riusarli.
+
+\subsection{Custom instruction KAN.DOT4}
+Con coefficienti e basi INT8, quattro valori entrano in un registro RV32. Si puo' definire una istruzione custom:
+\begin{equation}
+\texttt{KAN.DOT4}(rs1,rs2) = c_0b_0+c_1b_1+c_2b_2+c_3b_3,
+\end{equation}
+dove
+\begin{equation}
+rs1=[c_0,c_1,c_2,c_3], \qquad rs2=[b_0,b_1,b_2,b_3].
+\end{equation}
+Questa istruzione sfrutta direttamente la struttura locale della spline cubica.
+
+\section{Conclusioni}
+La repository realizza una pipeline completa di deployment: export JSON, generazione header, compilazione RISC-V, simulazione gem5 e confronto metriche. Il fix principale sostituisce la valutazione ricorsiva delle B-spline con una versione iterativa che preserva la matematica ma riduce overhead e ricalcoli. La prossima fase naturale e' trasformare il kernel in un workload hardware-friendly tramite quantizzazione, LUT, scratchpad e istruzioni custom packed.
+
+\end{document}

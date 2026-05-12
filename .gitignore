@@ -245,3 +245,16 @@ conic_run_config.json
 conic_model_final.pt
 conic_plots/
 artifacts/
+build/
+results/
+*.o
+__pycache__/
+*.pyc
+simulation_metrics/
+include/kan_model.h
+include/mlp_model.h
+*.png
+.codex
+plots/*
+plots/model_metrics/metrics.csv
+!src_inference/model
