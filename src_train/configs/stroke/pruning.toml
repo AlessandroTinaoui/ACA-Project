@@ -1,5 +1,5 @@
 [data]
-csv_path = "../../../datasets/healthcare-dataset-stroke-data.csv"
+csv_path = "../../../datasets/stroke/healthcare-dataset-stroke-data.csv"
 target_column = "stroke"
 header_row = 0
 separator = ","

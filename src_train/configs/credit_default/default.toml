@@ -1,5 +1,5 @@
 [data]
-csv_path = "../../../datasets/default of credit card clients.csv"
+csv_path = "../../../datasets/credit_default/default of credit card clients.csv"
 target_column = "default payment next month"
 header_row = 1
 separator = ","

@@ -12,7 +12,7 @@ Repository unico per:
 ## Struttura
 
 ```text
-datasets/        dataset tabellari e coniche
+datasets/        dataset organizzati per sottocartella
 src_train/       training KAN/MLP, config TOML, metriche e plot
 src_inference/   inferenza C, conversione JSON->header, build RISC-V, gem5
 artifacts/       export e checkpoint generati dal training
@@ -133,6 +133,7 @@ sync-inference-mlp       copia l'export MLP in src_inference/model/mlp/
 conic                    esegue il workflow coniche dal TOML unificato
 tabular-credit           training del modello credit-default
 tabular-stroke           training del modello stroke
+nasa                     training KAN regressivo NASA C-MAPSS RUL
 inference-host           build host KAN
 inference-riscv          build RISC-V KAN
 gem5-kan-cache           run gem5 KAN con L1+L2
@@ -271,7 +272,7 @@ Il TOML gestisce tre modalità:
 Dataset usato dal config di default:
 
 ```text
-datasets/Conic-Section_dataset.csv
+datasets/conic/Conic-Section_dataset.csv
 ```
 
 Output tipici:
@@ -327,8 +328,46 @@ python3 src_train/kan_models/models/tabular/stroke/main.py \
 Dataset:
 
 ```text
-datasets/default of credit card clients.csv
-datasets/healthcare-dataset-stroke-data.csv
+datasets/credit_default/default of credit card clients.csv
+datasets/stroke/healthcare-dataset-stroke-data.csv
+```
+
+## Training NASA C-MAPSS
+
+Preprocessing FD001:
+
+```bash
+python3 datasets/NASA/preprocessing.py
+```
+
+Training KAN regressivo:
+
+```bash
+make nasa
+```
+
+oppure:
+
+```bash
+python3 src_train/kan_models/models/nasa/main.py \
+  --config src_train/configs/nasa/default.toml
+```
+
+Dataset preprocessato:
+
+```text
+datasets/NASA/processed/train_windows.csv
+datasets/NASA/processed/test_windows.csv
+```
+
+Output:
+
+```text
+artifacts/nasa_kan/model.pt
+artifacts/nasa_kan/metrics.json
+artifacts/nasa_kan/history.csv
+artifacts/nasa_kan/test_predictions.csv
+artifacts/nasa_kan/training_history.png
 ```
 
 ## Inference C e gem5

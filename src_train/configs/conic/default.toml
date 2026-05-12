@@ -4,7 +4,7 @@ continual = false
 variant = "reversed" #reversed or standard
 
 [data]
-csv_path = "../../../datasets/Conic-Section_dataset.csv"
+csv_path = "../../../datasets/conic/Conic-Section_dataset.csv"
 target_column = "shape"
 
 [split]
