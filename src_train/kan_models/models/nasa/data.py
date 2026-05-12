@@ -22,6 +22,7 @@ class NasaDataset:
     y_test: torch.Tensor
     feature_names: list[str]
     target_scale: float
+    source: str
 
     @property
     def input_dim(self) -> int:
@@ -219,13 +220,13 @@ def _load_split(
     x_npy_path: Path | None,
     y_npy_path: Path | None,
 ) -> tuple[np.ndarray, np.ndarray, list[str]]:
-    if csv_path.exists():
-        return _load_csv(csv_path, target_column, window_mode, window_size, summary_statistics)
     if x_npy_path is not None and y_npy_path is not None and x_npy_path.exists() and y_npy_path.exists():
         return _load_npy(x_npy_path, y_npy_path, window_mode, window_size, summary_statistics)
+    if csv_path.exists():
+        return _load_csv(csv_path, target_column, window_mode, window_size, summary_statistics)
     raise FileNotFoundError(
         "Could not find a usable NASA split. Expected either "
-        f"{csv_path} or both {x_npy_path} and {y_npy_path}."
+        f"both {x_npy_path} and {y_npy_path}, or {csv_path}."
     )
 
 
@@ -297,4 +298,5 @@ def load_dataset(config: DataConfig) -> NasaDataset:
         y_test=torch.tensor(y_test.reshape(-1, 1) / scale, dtype=torch.float32),
         feature_names=feature_names,
         target_scale=scale,
+        source="npy" if config.x_train_npy_path and config.x_train_npy_path.exists() else "csv",
     )

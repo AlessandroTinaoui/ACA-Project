@@ -27,6 +27,7 @@ def run_experiment(config_path: str | Path = DEFAULT_CONFIG_PATH) -> dict[str, o
 
     print("\nNASA C-MAPSS RUL risultati finali")
     print(f"Config: {experiment.config_path}")
+    print(f"Dataset source: {dataset.source}")
     print(f"Input dim: {dataset.input_dim}")
     print(f"Model width: {metrics['model_width']}")
     print(f"Train metrics: {json.dumps(metrics['train'], ensure_ascii=True)}")
