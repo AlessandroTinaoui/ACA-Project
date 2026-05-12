@@ -202,7 +202,8 @@ cython_debug/
 # .vscode/
 # Temporary file for partial code execution
 tempCodeRunnerFile.py
-
+.codex
+.agents
 # Ruff stuff:
 .ruff_cache/
 
@@ -216,3 +217,31 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+artifacts/
+.venv/
+__pycache__/
+model
+continual_metrics.csv
+continual_class_tests.csv
+continual_accuracy_config.json
+continual_run_config.json
+continual_model_final.pt
+continual_plots/
+continual_metrics_reversed.csv
+continual_class_tests_reversed.csv
+continual_accuracy_config_reversed.json
+continual_run_config_reversed.json
+continual_model_final_reversed.pt
+continual_plots_reversed/
+pruning_metrics.csv
+high_loss_examples.csv
+pruning_plots/
+.codex
+copy_temp*
+conic_metrics.csv
+conic_class_tests.csv
+conic_high_loss_examples.csv
+conic_run_config.json
+conic_model_final.pt
+conic_plots/
+artifacts/

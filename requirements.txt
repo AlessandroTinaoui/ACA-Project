@@ -1,0 +1,10 @@
+# Python 3.11+ recommended (the codebase uses `tomllib` from the standard library).
+
+matplotlib
+numpy
+pandas
+pykan
+PyYAML
+scikit-learn
+torch
+tqdm
