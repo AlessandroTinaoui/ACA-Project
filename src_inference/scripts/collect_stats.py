@@ -27,6 +27,8 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 NUMBER_RE = re.compile(r"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$")
 ROOT = Path(__file__).resolve().parents[1]
+BEGIN_STATS = "---------- Begin Simulation Statistics"
+END_STATS = "---------- End Simulation Statistics"
 
 
 @dataclass
@@ -96,12 +98,38 @@ def split_description(comment: str) -> Tuple[str, str]:
     return comment, ""
 
 
-def parse_stats(path: Path) -> Gem5Stats:
-    entries: Dict[str, StatEntry] = {}
+def select_stats_section(sections: List[Dict[str, StatEntry]], section: str) -> Dict[str, StatEntry]:
+    if not sections:
+        return {}
+    if section == "first":
+        return sections[0]
+    if section == "last":
+        return sections[-1]
+    raise ValueError(f"Sezione stats non supportata: {section}")
+
+
+def parse_stats(path: Path, section: str = "first") -> Gem5Stats:
+    sections: List[Dict[str, StatEntry]] = []
+    unmarked_entries: Dict[str, StatEntry] = {}
+    current_entries: Dict[str, StatEntry] = {}
+    saw_section_marker = False
+    in_section = False
+
     with path.open("r", encoding="utf-8", errors="replace") as f:
         for line in f:
             line = line.rstrip("\n")
             stripped = line.strip()
+            if stripped.startswith(BEGIN_STATS):
+                saw_section_marker = True
+                current_entries = {}
+                in_section = True
+                continue
+            if stripped.startswith(END_STATS):
+                if in_section:
+                    sections.append(current_entries)
+                current_entries = {}
+                in_section = False
+                continue
             if not stripped or stripped.startswith("----------"):
                 continue
             before_comment, sep, comment = line.partition("#")
@@ -111,14 +139,23 @@ def parse_stats(path: Path) -> Gem5Stats:
             name = parts[0]
             raw_value = parts[1]
             desc, unit = split_description(comment) if sep else ("", "")
-            entries[name] = StatEntry(
+            target_entries = current_entries if saw_section_marker else unmarked_entries
+            if saw_section_marker and not in_section:
+                continue
+            target_entries[name] = StatEntry(
                 name=name,
                 value=parse_number(raw_value),
                 raw_value=raw_value,
                 description=desc,
                 unit=unit,
             )
-    return Gem5Stats(entries)
+
+    if in_section:
+        sections.append(current_entries)
+    if not saw_section_marker:
+        sections.append(unmarked_entries)
+
+    return Gem5Stats(select_stats_section(sections, section))
 
 
 def load_config(path: Optional[Path]) -> Optional[Dict[str, Any]]:
@@ -878,6 +915,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--format", choices=["md", "html", "json"], default="md", help="Formato del report")
     parser.add_argument("--title", default="Report gem5 data-only", help="Titolo del report")
     parser.add_argument("--top", type=int, default=20, help="Numero massimo di classi di istruzioni nel mix")
+    parser.add_argument(
+        "--stats-section",
+        choices=["first", "last"],
+        default="first",
+        help="Sezione di stats.txt da usare. Con m5_dump_stats, 'first' isola la finestra reset-to-dump.",
+    )
     args = parser.parse_args(argv)
 
     args.stats = resolve_path(args.stats)
@@ -889,7 +932,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"File stats non trovato: {args.stats}", file=sys.stderr)
         return 2
 
-    stats = parse_stats(args.stats)
+    stats = parse_stats(args.stats, section=args.stats_section)
     config = load_config(args.config)
     data = report_data(stats, config, top=max(args.top, 0))
     summary_data = build_summary_rows(stats, config, top=max(args.top, 0))

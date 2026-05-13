@@ -11,6 +11,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 
+from stats_sections import parse_stats
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_KAN_MODELS = ["1x1", "1x2x1", "1x4x1", "1x8x1"]
@@ -51,18 +52,6 @@ def parse_args() -> argparse.Namespace:
         help="Directory where CSV and PNG plots are written.",
     )
     return parser.parse_args()
-
-
-def parse_stats(path: Path) -> dict[str, str]:
-    stats: dict[str, str] = {}
-    if not path.exists():
-        return stats
-    with path.open("r", encoding="utf-8", errors="replace") as handle:
-        for line in handle:
-            parts = line.partition("#")[0].split()
-            if len(parts) >= 2:
-                stats[parts[0]] = parts[1]
-    return stats
 
 
 def parse_simout(path: Path) -> dict[str, str]:

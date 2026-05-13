@@ -1,13 +1,21 @@
 #include <math.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "gem5_stats.h"
 #include "kan_inference.h"
 #include "kan_model.h"
 
 #ifndef KAN_PI
 #define KAN_PI 3.14159265358979323846f
 #endif
+
+#ifndef KAN_WARMUP_RUNS
+#define KAN_WARMUP_RUNS 1
+#endif
+
+static volatile float kan_benchmark_sink = 0.0f;
 
 static float target_function(float x) {
     return sinf(2.0f * KAN_PI * x) + 0.35f * sinf(10.0f * KAN_PI * x);
@@ -20,7 +28,7 @@ static int parse_n(int argc, char **argv) {
 
     char *end = NULL;
     const long value = strtol(argv[1], &end, 10);
-    if (end == argv[1] || *end != '\0' || value <= 0) {
+    if (end == argv[1] || *end != '\0' || value <= 0 || value > INT_MAX) {
         fprintf(stderr, "Invalid N: %s\n", argv[1]);
         return -1;
     }
@@ -28,11 +36,57 @@ static int parse_n(int argc, char **argv) {
     return (int)value;
 }
 
+static float make_sample_x(int sample_index, int n) {
+    if (n == 1) {
+        return KAN_X_MIN;
+    }
+
+    const float t = (float)sample_index / (float)(n - 1);
+    return KAN_X_MIN + t * (KAN_X_MAX - KAN_X_MIN);
+}
+
+static void prepare_inputs(float *inputs, int n) {
+    for (int i = 0; i < n; ++i) {
+        inputs[i] = make_sample_x(i, n);
+    }
+}
+
+static void run_warmup(const float *inputs, int n) {
+    float sink = 0.0f;
+
+    for (int i = 0; i < KAN_WARMUP_RUNS; ++i) {
+        sink += kan_infer(inputs[i % n]);
+    }
+
+    kan_benchmark_sink = sink;
+}
+
+static void run_measured_inference(const float *inputs, float *predictions, int n) {
+    kan_gem5_reset_stats();
+
+    for (int i = 0; i < n; ++i) {
+        predictions[i] = kan_infer(inputs[i]);
+    }
+
+    kan_gem5_dump_stats();
+}
+
 int main(int argc, char **argv) {
     const int n = parse_n(argc, argv);
     if (n <= 0) {
         return 1;
     }
+
+    float *inputs = (float *)malloc((size_t)n * sizeof(*inputs));
+    float *predictions = (float *)malloc((size_t)n * sizeof(*predictions));
+    if (inputs == NULL || predictions == NULL) {
+        fprintf(stderr, "Allocation failed for N = %d\n", n);
+        free(inputs);
+        free(predictions);
+        return 1;
+    }
+
+    prepare_inputs(inputs, n);
 
     double sum_squared_error = 0.0;
     double sum_abs_error = 0.0;
@@ -50,10 +104,16 @@ int main(int argc, char **argv) {
     printf("num_knots = %d\n", KAN_NUM_KNOTS);
     printf("x_min = %.9g\n", KAN_X_MIN);
     printf("x_max = %.9g\n", KAN_X_MAX);
+    printf("measurement = kan_infer loop only\n");
+    printf("warmup_runs = %d\n\n", KAN_WARMUP_RUNS);
+    fflush(stdout);
+
+    run_warmup(inputs, n);
+    run_measured_inference(inputs, predictions, n);
 
     for (int i = 0; i < n; ++i) {
-        const float x = (n == 1) ? KAN_X_MIN : (float)i / (float)(n - 1);
-        const float y_pred = kan_infer(x);
+        const float x = inputs[i];
+        const float y_pred = predictions[i];
         const float y_true = target_function(x);
         const float error = y_pred - y_true;
         const float abs_error = fabsf(error);
@@ -88,5 +148,7 @@ int main(int argc, char **argv) {
     printf("CHECKSUM = %.9g\n", checksum_pred);
     printf("DONE\n");
 
+    free(inputs);
+    free(predictions);
     return 0;
 }

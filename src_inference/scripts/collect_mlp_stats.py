@@ -6,8 +6,8 @@ from __future__ import annotations
 import argparse
 import re
 from pathlib import Path
-from typing import Optional
 
+from stats_sections import parse_stats
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_STATS = ROOT / "results" / "mlp_l1_l2" / "stats.txt"
@@ -29,19 +29,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--stats", type=Path, default=DEFAULT_STATS)
     parser.add_argument("--simout", type=Path, default=DEFAULT_SIMOUT)
     return parser.parse_args()
-
-
-def parse_stats(path: Path) -> dict[str, str]:
-    stats: dict[str, str] = {}
-    if not path.exists():
-        return stats
-    with path.open("r", encoding="utf-8", errors="replace") as handle:
-        for line in handle:
-            before_comment = line.partition("#")[0]
-            parts = before_comment.split()
-            if len(parts) >= 2:
-                stats[parts[0]] = parts[1]
-    return stats
 
 
 def get_first(stats: dict[str, str], keys: list[str]) -> str:

@@ -85,4 +85,5 @@ python3 scripts/collect_stats.py \
   --out "$REPORT_PATH" \
   --summary-out "$SUMMARY_PATH" \
   --format md \
+  --stats-section first \
   --title "gem5 report $RUN_TAG"
