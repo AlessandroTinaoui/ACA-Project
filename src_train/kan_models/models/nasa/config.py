@@ -71,6 +71,7 @@ class EvaluationConfig:
 class OutputConfig:
     output_dir: Path
     model_filename: str = "model.pt"
+    export_json_filename: str = "nasa_kan_riscv_export.json"
     metrics_filename: str = "metrics.json"
     history_filename: str = "history.csv"
     predictions_filename: str = "test_predictions.csv"
@@ -171,6 +172,7 @@ def load_config(config_path: str | Path = DEFAULT_CONFIG_PATH) -> ExperimentConf
         output=OutputConfig(
             output_dir=resolve_path(config_dir, output_section["output_dir"]),
             model_filename=output_section.get("model_filename", "model.pt"),
+            export_json_filename=output_section.get("export_json_filename", "nasa_kan_riscv_export.json"),
             metrics_filename=output_section.get("metrics_filename", "metrics.json"),
             history_filename=output_section.get("history_filename", "history.csv"),
             predictions_filename=output_section.get("predictions_filename", "test_predictions.csv"),

@@ -34,4 +34,5 @@ def run_experiment(config_path: str | Path = DEFAULT_CONFIG_PATH) -> dict[str, o
     print(f"Validation metrics: {json.dumps(metrics['val'], ensure_ascii=True)}")
     print(f"Test metrics: {json.dumps(metrics['test'], ensure_ascii=True)}")
     print(f"Artefatti salvati in: {experiment.output.output_dir}")
+    print(f"Export RISC-V JSON: {experiment.output.output_dir / experiment.output.export_json_filename}")
     return metrics

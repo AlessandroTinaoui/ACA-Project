@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import csv
-import json
 import math
 import shutil
 from pathlib import Path
@@ -15,7 +14,7 @@ import torch
 import torch.nn.functional as F
 
 from kan_models.common.kan_compat import KAN
-from kan_models.common.shared import clone_state_dict, serialize_width
+from kan_models.common.shared import clone_state_dict, serialize_width, write_json
 from kan_models.models.nasa.config import ExperimentConfig, ModelConfig, TrainingConfig
 from kan_models.models.nasa.data import NasaDataset
 
@@ -303,6 +302,125 @@ def save_history_plot(path: Path, history: list[dict[str, float]]) -> None:
     plt.close(fig)
 
 
+def _plain_width_from_model(model: KAN) -> list[int]:
+    if not model.act_fun:
+        raise ValueError("Cannot export a KAN without activation layers.")
+
+    width = [int(model.act_fun[0].grid.shape[0])]
+    for layer in model.act_fun:
+        width.append(int(layer.coef.shape[1]))
+    return width
+
+
+def _infer_grid_range(model: KAN, degree: int) -> tuple[float, float]:
+    left_edges: list[float] = []
+    right_edges: list[float] = []
+
+    for layer in model.act_fun:
+        knots = layer.grid.detach().cpu()
+        if knots.ndim != 2 or knots.shape[1] <= 2 * degree:
+            raise ValueError(f"Invalid knot tensor shape for export: {tuple(knots.shape)}")
+        left_edges.append(float(knots[:, degree].min()))
+        right_edges.append(float(knots[:, -(degree + 1)].max()))
+
+    return min(left_edges), max(right_edges)
+
+
+def extract_export_payload(
+    experiment: ExperimentConfig,
+    dataset: NasaDataset,
+    model: KAN,
+    metrics: dict[str, Any],
+) -> dict[str, Any]:
+    """Extract a layered KAN JSON export readable by src_inference/json_to_header.py."""
+    width = _plain_width_from_model(model)
+    degree = int(experiment.model.k)
+    num_intervals = int(experiment.model.grid)
+    num_control_points = num_intervals + degree
+    num_knots = num_intervals + 1 + 2 * degree
+    x_min, x_max = _infer_grid_range(model, degree)
+    layers_payload: list[dict[str, Any]] = []
+
+    if width[0] != dataset.input_dim:
+        raise ValueError(f"Export width starts at {width[0]}, but dataset input_dim is {dataset.input_dim}.")
+
+    for index, layer in enumerate(model.act_fun):
+        knots = layer.grid.detach().cpu()
+        control_points = layer.coef.detach().cpu()
+        scale_base = layer.scale_base.detach().cpu()
+        scale_sp = layer.scale_sp.detach().cpu()
+        mask = layer.mask.detach().cpu()
+
+        input_dim = width[index]
+        output_dim = width[index + 1]
+        expected_shapes = {
+            "knots": (input_dim, num_knots),
+            "control_points": (input_dim, output_dim, num_control_points),
+            "scale_base": (input_dim, output_dim),
+            "scale_sp": (input_dim, output_dim),
+            "mask": (input_dim, output_dim),
+        }
+        actual_shapes = {
+            "knots": tuple(knots.shape),
+            "control_points": tuple(control_points.shape),
+            "scale_base": tuple(scale_base.shape),
+            "scale_sp": tuple(scale_sp.shape),
+            "mask": tuple(mask.shape),
+        }
+        for name, expected_shape in expected_shapes.items():
+            if actual_shapes[name] != expected_shape:
+                raise ValueError(
+                    f"Layer {index}: expected {name} shape {expected_shape}, "
+                    f"found {actual_shapes[name]}."
+                )
+
+        layers_payload.append(
+            {
+                "layer_index": index,
+                "input_dim": input_dim,
+                "output_dim": output_dim,
+                "knots": [[float(value) for value in row] for row in knots.tolist()],
+                "control_points": [
+                    [[float(value) for value in edge_control_points] for edge_control_points in source_edges]
+                    for source_edges in control_points.tolist()
+                ],
+                "scale_base": [
+                    [float(value) for value in row]
+                    for row in scale_base.tolist()
+                ],
+                "scale_sp": [
+                    [float(value) for value in row]
+                    for row in scale_sp.tolist()
+                ],
+                "mask": [
+                    [float(value) for value in row]
+                    for row in mask.tolist()
+                ],
+            }
+        )
+
+    return {
+        "model_type": "kan_spline_stack",
+        "dataset": "nasa_cmapss_rul",
+        "config_path": str(experiment.config_path),
+        "width": width,
+        "input_dim": width[0],
+        "output_dim": width[-1],
+        "degree": degree,
+        "num_control_points": num_control_points,
+        "num_knots": num_knots,
+        "num_intervals": num_intervals,
+        "x_min": x_min,
+        "x_max": x_max,
+        "target_scale": float(experiment.data.target_scale),
+        "feature_names": list(dataset.feature_names),
+        "base_branch_enabled": True,
+        "symbolic_branch_enabled": bool(experiment.model.symbolic_enabled),
+        "metrics": metrics,
+        "layers": layers_payload,
+    }
+
+
 def save_artifacts(
     experiment: ExperimentConfig,
     dataset: NasaDataset,
@@ -314,11 +432,13 @@ def save_artifacts(
     output_dir = experiment.output.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
     model_path = output_dir / experiment.output.model_filename
+    export_path = output_dir / experiment.output.export_json_filename
     metrics_path = output_dir / experiment.output.metrics_filename
     history_path = output_dir / experiment.output.history_filename
     predictions_path = output_dir / experiment.output.predictions_filename
     config_snapshot_path = output_dir / experiment.output.config_snapshot_filename
     plot_path = output_dir / experiment.output.plot_filename
+    export_payload = extract_export_payload(experiment, dataset, model, metrics)
 
     torch.save(
         {
@@ -329,13 +449,13 @@ def save_artifacts(
             "target_scale": experiment.data.target_scale,
             "feature_names": dataset.feature_names,
             "metrics": metrics,
+            "export": export_payload,
             "config": experiment.raw_config,
         },
         model_path,
     )
-    with metrics_path.open("w", encoding="utf-8") as handle:
-        json.dump(metrics, handle, indent=2)
-        handle.write("\n")
+    write_json(export_path, export_payload)
+    write_json(metrics_path, metrics)
     save_history(history_path, history)
     save_predictions(predictions_path, dataset.y_test, test_predictions, dataset.target_scale)
     save_history_plot(plot_path, history)

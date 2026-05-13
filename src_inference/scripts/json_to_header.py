@@ -18,6 +18,8 @@ MODEL_ALIASES = {
     "1x2x1": ROOT / "model" / "1x2x1",
     "1x4x1": ROOT / "model" / "1x4x1",
     "1x8x1": ROOT / "model" / "1x8x1",
+    "nasa": ROOT.parent / "artifacts" / "nasa_kan" / "nasa_kan_riscv_export.json",
+    "nasa_kan": ROOT.parent / "artifacts" / "nasa_kan" / "nasa_kan_riscv_export.json",
 }
 
 
@@ -78,6 +80,24 @@ def c_int_array(values: list[int]) -> str:
     return ", ".join(str(int(value)) for value in values)
 
 
+def format_1d_int_array(values: list[int], indent: str) -> str:
+    lines = []
+    for index in range(0, len(values), 8):
+        chunk = values[index : index + 8]
+        lines.append(indent + ", ".join(str(int(value)) for value in chunk))
+    return ",\n".join(lines) if lines else indent + "0"
+
+
+def format_2d_int_array(values: list[list[int]], indent: str) -> str:
+    rows = []
+    inner_indent = indent + "    "
+    for row in values:
+        rows.append(
+            indent + "{\n" + format_1d_int_array(row, inner_indent) + "\n" + indent + "}"
+        )
+    return ",\n".join(rows)
+
+
 def normalize_layers(data: dict) -> list[dict]:
     if "layers" in data:
         return data["layers"]
@@ -102,6 +122,57 @@ def zero_knots(num_knots: int) -> list[float]:
 
 def zero_control_points(num_control_points: int) -> list[float]:
     return [0.0] * num_control_points
+
+
+def is_uniform_knot_vector(knots: list[float], tolerance: float = 1e-5) -> bool:
+    if len(knots) < 2:
+        return False
+    delta = float(knots[1]) - float(knots[0])
+    if abs(delta) <= tolerance:
+        return False
+    for left, right in zip(knots, knots[1:]):
+        if abs((float(right) - float(left)) - delta) > tolerance:
+            return False
+    return True
+
+
+def build_knot_metadata(
+    dense_knots: list[list[list[float]]],
+    layer_input_dims: list[int],
+    max_input_dim: int,
+) -> tuple[list[list[int]], list[list[float]], list[list[float]], list[list[float]], bool]:
+    uniform_flags: list[list[int]] = []
+    knot_bases: list[list[float]] = []
+    knot_deltas: list[list[float]] = []
+    knot_inv_deltas: list[list[float]] = []
+    all_active_uniform = True
+
+    for layer_index, layer_knots in enumerate(dense_knots):
+        layer_flags: list[int] = []
+        layer_bases: list[float] = []
+        layer_deltas: list[float] = []
+        layer_inv_deltas: list[float] = []
+        input_dim = layer_input_dims[layer_index]
+
+        for input_index in range(max_input_dim):
+            knot_vector = layer_knots[input_index]
+            active = input_index < input_dim
+            uniform = active and is_uniform_knot_vector(knot_vector)
+            delta = float(knot_vector[1]) - float(knot_vector[0]) if uniform else 0.0
+            if active and not uniform:
+                all_active_uniform = False
+
+            layer_flags.append(1 if uniform else 0)
+            layer_bases.append(float(knot_vector[0]) if uniform else 0.0)
+            layer_deltas.append(delta)
+            layer_inv_deltas.append(1.0 / delta if uniform else 0.0)
+
+        uniform_flags.append(layer_flags)
+        knot_bases.append(layer_bases)
+        knot_deltas.append(layer_deltas)
+        knot_inv_deltas.append(layer_inv_deltas)
+
+    return uniform_flags, knot_bases, knot_deltas, knot_inv_deltas, all_active_uniform
 
 
 def format_1d_float_array(values: list[float], indent: str) -> str:
@@ -222,6 +293,45 @@ def build_dense_layers(
     return dense_knots, dense_control_points, dense_scale_sp, dense_scale_base, dense_mask
 
 
+def build_flat_edges(
+    dense_control_points: list[list[list[list[float]]]],
+    dense_scale_sp: list[list[list[float]]],
+    dense_scale_base: list[list[list[float]]],
+    dense_mask: list[list[list[float]]],
+    layer_input_dims: list[int],
+    layer_output_dims: list[int],
+) -> tuple[list[int], list[list[float]], list[float], list[float], list[float]]:
+    edge_offsets: list[int] = []
+    edge_control_points: list[list[float]] = []
+    edge_scale_sp: list[float] = []
+    edge_scale_base: list[float] = []
+    edge_mask: list[float] = []
+
+    for layer_index, input_dim in enumerate(layer_input_dims):
+        output_dim = layer_output_dims[layer_index]
+        edge_offsets.append(len(edge_control_points))
+        for input_index in range(input_dim):
+            for output_index in range(output_dim):
+                edge_control_points.append(
+                    dense_control_points[layer_index][input_index][output_index]
+                )
+                edge_scale_sp.append(
+                    dense_scale_sp[layer_index][input_index][output_index]
+                )
+                edge_scale_base.append(
+                    dense_scale_base[layer_index][input_index][output_index]
+                )
+                edge_mask.append(
+                    dense_mask[layer_index][input_index][output_index]
+                )
+
+    return edge_offsets, edge_control_points, edge_scale_sp, edge_scale_base, edge_mask
+
+
+def all_close_to(values: list[float], expected: float, tolerance: float = 1e-7) -> bool:
+    return all(abs(float(value) - expected) <= tolerance for value in values)
+
+
 def main() -> None:
     args = parse_args()
     json_path = resolve_model_path(args.model)
@@ -234,8 +344,10 @@ def main() -> None:
     degree = int(require_key(data, "degree"))
     num_control_points = int(require_key(data, "num_control_points"))
     num_knots = int(require_key(data, "num_knots"))
+    num_intervals = int(data.get("num_intervals", num_knots - 1 - 2 * degree))
     x_min = float(require_key(data, "x_min"))
     x_max = float(require_key(data, "x_max"))
+    target_scale = float(data.get("target_scale", 1.0))
     layers = normalize_layers(data)
     num_layers = len(layers)
 
@@ -266,6 +378,50 @@ def main() -> None:
 
     layer_input_dims = [int(layer["input_dim"]) for layer in layers]
     layer_output_dims = [int(layer["output_dim"]) for layer in layers]
+    (
+        knot_uniform_flags,
+        knot_bases,
+        knot_deltas,
+        knot_inv_deltas,
+        all_active_knots_uniform,
+    ) = build_knot_metadata(
+        dense_knots,
+        layer_input_dims,
+        max_input_dim,
+    )
+    (
+        layer_edge_offsets,
+        edge_control_points,
+        edge_scale_sp,
+        edge_scale_base,
+        edge_mask,
+    ) = build_flat_edges(
+        dense_control_points,
+        dense_scale_sp,
+        dense_scale_base,
+        dense_mask,
+        layer_input_dims,
+        layer_output_dims,
+    )
+    has_edge_masks = not all_close_to(edge_mask, 1.0)
+    base_branch_enabled = bool(data.get("base_branch_enabled", False)) or not all_close_to(
+        edge_scale_base,
+        0.0,
+    )
+    edge_mask_block = ""
+    if has_edge_masks:
+        edge_mask_block = f"""
+static const float KAN_EDGE_MASK[KAN_NUM_EDGES] = {{
+{format_1d_float_array(edge_mask, "    ")}
+}};
+"""
+    full_knot_block = ""
+    if not all_active_knots_uniform:
+        full_knot_block = f"""
+static const float KAN_LAYER_KNOTS[KAN_NUM_LAYERS][KAN_MAX_INPUT_DIM][KAN_NUM_KNOTS] = {{
+{format_3d_float_array(dense_knots, "    ")}
+}};
+"""
 
     HEADER_PATH.parent.mkdir(parents=True, exist_ok=True)
     HEADER_PATH.write_text(
@@ -283,13 +439,21 @@ def main() -> None:
 #define KAN_DEGREE {degree}
 #define KAN_NUM_CONTROL_POINTS {num_control_points}
 #define KAN_NUM_KNOTS {num_knots}
+#define KAN_NUM_INTERVALS {num_intervals}
 #define KAN_NUM_LAYERS {num_layers}
 #define KAN_MAX_LAYER_WIDTH {max_layer_width}
 #define KAN_MAX_INPUT_DIM {max_input_dim}
 #define KAN_MAX_OUTPUT_DIM {max_output_dim}
+#define KAN_NUM_EDGES {len(edge_control_points)}
+#define KAN_HAS_KNOT_METADATA 1
+#define KAN_USE_IMPLICIT_UNIFORM_KNOTS {1 if all_active_knots_uniform else 0}
+#define KAN_HAS_FLAT_EDGES 1
+#define KAN_HAS_EDGE_MASKS {1 if has_edge_masks else 0}
+#define KAN_BASE_BRANCH_ENABLED {1 if base_branch_enabled else 0}
 
 static const float KAN_X_MIN = {c_float(x_min)};
 static const float KAN_X_MAX = {c_float(x_max)};
+static const float KAN_TARGET_SCALE = {c_float(target_scale)};
 
 static const int KAN_WIDTHS[KAN_NUM_LAYERS + 1] = {{
     {c_int_array(width)}
@@ -303,25 +467,38 @@ static const int KAN_LAYER_OUTPUT_DIMS[KAN_NUM_LAYERS] = {{
     {c_int_array(layer_output_dims)}
 }};
 
-static const float KAN_LAYER_KNOTS[KAN_NUM_LAYERS][KAN_MAX_INPUT_DIM][KAN_NUM_KNOTS] = {{
-{format_3d_float_array(dense_knots, "    ")}
+static const int KAN_LAYER_EDGE_OFFSETS[KAN_NUM_LAYERS] = {{
+    {c_int_array(layer_edge_offsets)}
 }};
 
-static const float KAN_LAYER_CONTROL_POINTS[KAN_NUM_LAYERS][KAN_MAX_INPUT_DIM][KAN_MAX_OUTPUT_DIM][KAN_NUM_CONTROL_POINTS] = {{
-{format_4d_float_array(dense_control_points, "    ")}
+static const int KAN_LAYER_KNOTS_UNIFORM[KAN_NUM_LAYERS][KAN_MAX_INPUT_DIM] = {{
+{format_2d_int_array(knot_uniform_flags, "    ")}
 }};
 
-static const float KAN_LAYER_SCALE_SP[KAN_NUM_LAYERS][KAN_MAX_INPUT_DIM][KAN_MAX_OUTPUT_DIM] = {{
-{format_3d_float_array(dense_scale_sp, "    ")}
+static const float KAN_LAYER_KNOT_BASE[KAN_NUM_LAYERS][KAN_MAX_INPUT_DIM] = {{
+{format_2d_float_array(knot_bases, "    ")}
 }};
 
-static const float KAN_LAYER_SCALE_BASE[KAN_NUM_LAYERS][KAN_MAX_INPUT_DIM][KAN_MAX_OUTPUT_DIM] = {{
-{format_3d_float_array(dense_scale_base, "    ")}
+static const float KAN_LAYER_KNOT_DELTA[KAN_NUM_LAYERS][KAN_MAX_INPUT_DIM] = {{
+{format_2d_float_array(knot_deltas, "    ")}
 }};
 
-static const float KAN_LAYER_MASK[KAN_NUM_LAYERS][KAN_MAX_INPUT_DIM][KAN_MAX_OUTPUT_DIM] = {{
-{format_3d_float_array(dense_mask, "    ")}
+static const float KAN_LAYER_KNOT_INV_DELTA[KAN_NUM_LAYERS][KAN_MAX_INPUT_DIM] = {{
+{format_2d_float_array(knot_inv_deltas, "    ")}
 }};
+{full_knot_block}
+static const float KAN_EDGE_CONTROL_POINTS[KAN_NUM_EDGES][KAN_NUM_CONTROL_POINTS] = {{
+{format_2d_float_array(edge_control_points, "    ")}
+}};
+
+static const float KAN_EDGE_SCALE_SP[KAN_NUM_EDGES] = {{
+{format_1d_float_array(edge_scale_sp, "    ")}
+}};
+
+static const float KAN_EDGE_SCALE_BASE[KAN_NUM_EDGES] = {{
+{format_1d_float_array(edge_scale_base, "    ")}
+}};
+{edge_mask_block}
 
 #endif /* KAN_MODEL_H */
 """,
@@ -338,9 +515,12 @@ static const float KAN_LAYER_MASK[KAN_NUM_LAYERS][KAN_MAX_INPUT_DIM][KAN_MAX_OUT
     print(f"degree = {degree}")
     print(f"num_control_points = {num_control_points}")
     print(f"num_knots = {num_knots}")
+    print(f"num_intervals = {num_intervals}")
     print(f"num_layers = {num_layers}")
+    print(f"num_edges = {len(edge_control_points)}")
     print(f"x_min = {x_min}")
     print(f"x_max = {x_max}")
+    print(f"target_scale = {target_scale}")
 
 
 if __name__ == "__main__":

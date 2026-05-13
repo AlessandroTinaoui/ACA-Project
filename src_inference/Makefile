@@ -19,4 +19,4 @@ run-all-models:
 	bash scripts/run_all_models_compare.sh $(N) $(MLP_MODEL)
 
 distclean: clean
-	rm -f include/kan_model.h include/mlp_model.h
+	rm -f include/kan_model.h include/mlp_model.h include/nasa_test_data.h

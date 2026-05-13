@@ -47,6 +47,7 @@ rul_tolerance = 10.0
 [output]
 output_dir = "../../../artifacts/nasa_kan"
 model_filename = "model.pt"
+export_json_filename = "nasa_kan_riscv_export.json"
 metrics_filename = "metrics.json"
 history_filename = "history.csv"
 predictions_filename = "test_predictions.csv"
