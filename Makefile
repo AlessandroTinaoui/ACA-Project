@@ -11,13 +11,15 @@ CONIC_CONFIG ?= src_train/configs/conic/default.toml
 CREDIT_CONFIG ?= src_train/configs/credit_default/default.toml
 STROKE_CONFIG ?= src_train/configs/stroke/pruning.toml
 NASA_CONFIG ?= src_train/configs/nasa/default.toml
+NASA_QUANT_W_BITS ?= 16
+NASA_QUANT_A_BITS ?= 16
 
 KAN_MODEL_SLUG = $(subst x,_,$(KAN_MODEL))
 KAN_EXPORT_SRC ?= artifacts/fun_1_d/kan_$(KAN_MODEL_SLUG)/mini_kan_riscv_export.json
 MLP_EXPORT_SRC ?= artifacts/sine_1d_mlp/mlp_riscv_export.json
 
 .PHONY: help install train-fun-kan train-fun-mlp compare-fun-predictions \
-	sync-inference-kan sync-inference-mlp conic tabular-credit tabular-stroke nasa \
+	sync-inference-kan sync-inference-mlp conic tabular-credit tabular-stroke nasa nasa-quant \
 	inference-host inference-riscv inference-mlp-host inference-mlp-riscv \
 	gem5-kan-cache gem5-kan-l1 gem5-kan-nocache gem5-mlp \
 	gem5-compare-one gem5-compare-all gem5-plots gem5-all clean
@@ -34,6 +36,7 @@ help:
 	"tabular-credit           Run the credit-default tabular experiment" \
 	"tabular-stroke           Run the stroke tabular experiment" \
 	"nasa                     Run the NASA C-MAPSS RUL KAN regression" \
+	"nasa-quant               Apply QuantKAN PTQ to the NASA KAN checkpoint" \
 	"inference-host           Build the host KAN binary" \
 	"inference-riscv          Build the RISC-V KAN binary" \
 	"inference-mlp-host       Build the host MLP binary" \
@@ -83,6 +86,9 @@ tabular-stroke:
 
 nasa:
 	$(PYTHON) src_train/kan_models/models/nasa/main.py --config $(NASA_CONFIG)
+
+nasa-quant:
+	$(PYTHON) src_train/kan_models/models/nasa/quantize.py --config $(NASA_CONFIG) --w-bit $(NASA_QUANT_W_BITS) --a-bit $(NASA_QUANT_A_BITS)
 
 inference-host:
 	bash src_inference/scripts/build_host.sh

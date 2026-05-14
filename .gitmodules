@@ -1,3 +1,6 @@
 [submodule "gem5"]
 	path = gem5
 	url = https://github.com/AlessandroTinaoui/gem5.git
+[submodule "external/QuantKAN"]
+	path = external/QuantKAN
+	url = https://github.com/AlessandroTinaoui/QuantKAN.git
