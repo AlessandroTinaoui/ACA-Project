@@ -1,443 +1,496 @@
-% A LaTeX template for ARTICLE version of the MSc Thesis submissions to 
-% Politecnico di Milano (PoliMi) - School of Industrial and Information Engineering
-%
-% S. Bonetti, A. Gruttadauria, G. Mescolini, A. Zingaro
-% e-mail: template-tesi-ingind@polimi.it
-%
-% Last Revision: October 2021
-%
-% Copyright 2021 Politecnico di Milano, Italy. Inc. NC-BY
-
-\documentclass[11pt,a4paper]{article} 
+\documentclass[11pt,a4paper]{article}
 
 %------------------------------------------------------------------------------
-%	REQUIRED PACKAGES AND  CONFIGURATIONS
+% Politecnico di Milano article-style layout
 %------------------------------------------------------------------------------
-% PACKAGES FOR TITLES
 \usepackage{titlesec}
 \usepackage{color}
-
-% PACKAGES FOR LANGUAGE AND FONT
 \usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
 \usepackage[english]{babel}
-\usepackage[T1]{fontenc} % Font encoding
-
-% PACKAGES FOR IMAGES
 \usepackage{graphicx}
+\usepackage{epstopdf}
+\epstopdfsetup{update}
+\DeclareGraphicsExtensions{.pdf,.png,.jpg,.eps}
 \graphicspath{{Images/}}
-\usepackage{eso-pic} % For the background picture on the title page
-\usepackage{subfig} % Numbered and caption subfigures using \subfloat
-\usepackage{caption} % Coloured captions
+\usepackage{eso-pic}
+\usepackage{caption}
 \usepackage{transparent}
-
-% STANDARD MATH PACKAGES
 \usepackage{amsmath}
+\usepackage{amssymb}
 \usepackage{amsthm}
 \usepackage{bm}
-\usepackage[overload]{empheq}  % For braced-style systems of equations
-
-% PACKAGES FOR TABLES
+\usepackage{booktabs}
 \usepackage{tabularx}
-\usepackage{longtable} % tables that can span several pages
-\usepackage{colortbl}
-
-% PACKAGES FOR ALGORITHMS (PSEUDO-CODE)
 \usepackage{algorithm}
 \usepackage{algorithmic}
-
-% PACKAGES FOR REFERENCES & BIBLIOGRAPHY
-\usepackage[colorlinks=true,linkcolor=black,anchorcolor=black,citecolor=black,filecolor=black,menucolor=black,runcolor=black,urlcolor=black]{hyperref} % Adds clickable links at references
-\usepackage{cleveref}
-\usepackage[square, numbers, sort&compress]{natbib} % Square brackets, citing references with numbers, citations sorted by appearance in the text and compressed
-\bibliographystyle{plain} % You may use a different style adapted to your field
-
-% PACKAGES FOR THE APPENDIX
-\usepackage{appendix}
-
-% PACKAGES FOR ITEMIZE & ENUMERATES 
+\usepackage{thmtools}
+\usepackage{etoolbox}
+\usepackage{xcolor}
+\usepackage{fancyhdr}
+\usepackage[colorlinks=true,linkcolor=black,anchorcolor=black,citecolor=black,filecolor=black,menucolor=black,runcolor=black,urlcolor=black]{hyperref}
 \usepackage{enumitem}
 
-% OTHER PACKAGES
-\usepackage{amsthm,thmtools,xcolor} % Coloured "Theorem"
-\usepackage{comment} % Comment part of code
-\usepackage{fancyhdr} % Fancy headers and footers
-\usepackage{lipsum} % Insert dummy text
-\usepackage{tcolorbox} % Create coloured boxes (e.g. the one for the key-words)
-
-%-------------------------------------------------------------------------
-%	NEW COMMANDS DEFINED
-%-------------------------------------------------------------------------
-% EXAMPLES OF NEW COMMANDS -> here you see how to define new commands
-\newcommand{\bea}{\begin{eqnarray}} % Shortcut for equation arrays
-\newcommand{\eea}{\end{eqnarray}}
-\newcommand{\e}[1]{\times 10^{#1}}  % Powers of 10 notation
-\newcommand{\mathbbm}[1]{\text{\usefont{U}{bbm}{m}{n}#1}} % From mathbbm.sty
-\newcommand{\pdev}[2]{\frac{\partial#1}{\partial#2}}
-% NB: you can also override some existing commands with the keyword \renewcommand
-
-%----------------------------------------------------------------------------
-%	ADD YOUR PACKAGES (be careful of package interaction)
-%----------------------------------------------------------------------------
-
-
-%----------------------------------------------------------------------------
-%	ADD YOUR DEFINITIONS AND COMMANDS (be careful of existing commands)
-%----------------------------------------------------------------------------
-
-
-% Do not change Configuration_files/config.tex file unless you really know what you are doing. 
-% This file ends the configuration procedures (e.g. customizing commands, definition of new commands)
+% Do not change Configuration_files/config.tex unless the global layout changes.
 \input{Configuration_files/config}
 
-% Insert here the info that will be displayed into your Title page 
-% -> title of your work
-\renewcommand{\title}{Title}
-% -> author name and surname
-\renewcommand{\author}{Name Surname}
-% -> MSc course
-\newcommand{\course}{Xxxxxxxxxxxx Engineering - Ingegneria Xxxxxxxxxxxx}
-% -> advisor name and surname
-\newcommand{\advisor}{Prof. Name Surname}
-% IF AND ONLY IF you need to modify the co-supervisors you also have to modify the file Configuration_files/title_page.tex (ONLY where it is marked)
-\newcommand{\firstcoadvisor}{Name Surname} % insert if any otherwise comment
-\newcommand{\secondcoadvisor}{Name Surname} % insert if any otherwise comment
-% -> author ID
-\newcommand{\ID}{Student ID}
-% -> academic year
-\newcommand{\YEAR}{20XX-20XX}
-% -> abstract (only in English)
-\renewcommand{\abstract}{Here goes the Abstract in English of your thesis (in article format)
-followed by a list of keywords.
-The Abstract is a concise summary of the content of the thesis (single page of text)
-and a guide to the most important contributions included in your thesis.
-The Abstract is the very last thing you write.
-It should be a self-contained text and should be clear
-to someone who hasn't (yet) read the whole manuscript.
-The Abstract should contain the answers to the main research questions
-that have been addressed in your thesis.
-It needs to summarize the motivations and the adopted approach as well as
-the findings of your work and their relevance and impact.
-The Abstract is the part appearing in the record of your thesis inside POLITesi,
-the Digital Archive of PhD and Master Theses (Laurea Magistrale) of Politecnico di Milano.
-The Abstract will be followed by a list of four to six keywords.
-Keywords are a tool to help indexers and search engines to find relevant documents.
-To be relevant and effective, keywords must be chosen carefully.
-They should represent the content of your work and be specific to your field or sub-field.
-Keywords may be a single word or two to four words. }
+\setlength{\parskip}{6pt}
 
-% -> key-words (only in English)
-\newcommand{\keywords}{here, the keywords, of your thesis}
+% Front-page metadata.
+\renewcommand{\title}{Deployment and Analysis of Kolmogorov-Arnold Networks on RISC-V with gem5}
+\renewcommand{\author}{Giovanni Vaccaro, Alessandro Tinaoui}
+\newcommand{\course}{HPC Engineering}
+\newcommand{\advisor}{Prof. Silvano Cristina}
+\newcommand{\firstcoadvisor}{PhD Mattia Balla}
+\newcommand{\secondcoadvisor}{}
+\newcommand{\ID}{}
+\newcommand{\YEAR}{2025-2026}
+\renewcommand{\abstract}{%
+This work studies the deployment of Kolmogorov-Arnold Networks on a simulated RISC-V platform using gem5.
+The model is trained in Python, exported into a static representation, translated into C data structures, and finally compiled into a RISC-V executable.
+The goal is to connect the mathematical structure of the network with the concrete execution path of a single inference, from the exported parameters to the memory hierarchy observed in simulation.
+}
 
-%-------------------------------------------------------------------------
-%	BEGIN OF YOUR DOCUMENT
-%-------------------------------------------------------------------------
 \begin{document}
 
-%-----------------------------------------------------------------------------
-% TITLE PAGE
-%-----------------------------------------------------------------------------
-% Do not change Configuration_files/TitlePage.tex (Modify it IF AND ONLY IF you need to add or delete the Co-advisors)
-% This file creates the Title Page of the document
 \input{Configuration_files/title_page}
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%     THESIS MAIN TEXT     %%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-%-----------------------------------------------------------------------------
-% INTRODUCTION
-%-----------------------------------------------------------------------------
 \section{Introduction}
-\label{sec:introduction}
-This document is intended to be both an example of the Polimi \LaTeX{} template for Master Theses in article format,
-as well as a short introduction to its use. It is not intended to be a general introduction to \LaTeX{} itself,
-and the reader is assumed to be familiar with the basics of creating and compiling \LaTeX{} documents (see \cite{oetiker1995not, kottwitz2015latex}). 
-\\
-The cover page of the thesis in article format must contain all the relevant information:
-title of the thesis, name of the Study Programme, name(s) of the author(s),
-student ID number, name of the supervisor, name(s) of the co-supervisor(s) (if any), academic year.
-\\
-Be sure to select a title that is meaningful.
-It should contain important keywords to be identified by indexer.
-Keep the title as concise as possible and comprehensible even to people who are not experts in your field.
-The title has to be chosen at the end of your work so that it accurately captures the main subject of the manuscript.
 
-It is convenient to break the article format of your thesis (in article format) into sections and subsections. 
-If necessary, subsubsections, paragraphs and subparagraphs can be used. 
-A new section is created by the command
-\begin{verbatim}
-\section{Title of the section}
-\end{verbatim}
-The numbering can be turned off by using \verb|\section*{}|.
-A new subsection is created by the command
-\begin{verbatim}
-\subsection{Title of the subsection}
-\end{verbatim}
-and, similarly, the numbering can be turned off by adding an asterisk as follows 
-\begin{verbatim}
-\subsection*{}
-\end{verbatim}
-It is recommended to give a label to each section by using the command
-\begin{verbatim}
-\label{sec:section_name}%
-\end{verbatim}
-where the argument is just a text string that you'll use to reference that part
-as follows: \textit{Section~\ref{sec:introduction} contains \sc{INTRODUCTION}  \dots}.
+Kolmogorov-Arnold Networks (KANs) are a recent neural architecture built around learnable univariate functions.
+In a KAN layer, each connection transforms one scalar input through its own function, and each output node collects the contributions arriving from the previous layer.
+This makes the network naturally tied to function evaluation, spline representation, and memory layout.
+For this reason, implementing KAN inference on a simulated architecture is not only a matter of reproducing the numerical model, but also of deciding how its many small edge functions are represented in code and stored in memory.
 
-%-----------------------------------------------------------------------------
-% EQUATIONS
-%-----------------------------------------------------------------------------
-\section{Equations}
-\label{sec:eqs}
-This section gives some examples of writing mathematical equations in your thesis.
+The project presented in this report focuses on that implementation problem.
+A KAN model is trained in Python, exported into a representation that can be consumed by C code, cross-compiled for RISC-V, and executed inside gem5.
+The simulator is then used to observe the cost of inference at the architectural level, with particular attention to instruction execution, cache accesses, and the placement of model parameters in memory.
 
-Maxwell's equations read:
-\begin{subequations}
-    \label{eq:maxwell}
-    \begin{align}[left=\empheqlbrace]
-    \nabla\cdot \bm{D} & = \rho, \label{eq:maxwell1} \\
-    \nabla \times \bm{E} +  \frac{\partial \bm{B}}{\partial t} & = \bm{0}, \label{eq:maxwell2} \\
-    \nabla\cdot \bm{B} & = 0, \label{eq:maxwell3} \\
-    \nabla \times \bm{H} - \frac{\partial \bm{D}}{\partial t} &= \bm{J}. \label{eq:maxwell4}
-    \end{align}
-\end{subequations}
+\section{A Working View of Kolmogorov-Arnold Networks}
+\label{sec:kan_math}
 
-Equation~\eqref{eq:maxwell} is automatically labeled by \texttt{cleveref},
-as well as Equation~\eqref{eq:maxwell1} and Equation~\eqref{eq:maxwell3}.
-Thanks to the \verb|cleveref| package, there is no need to use \verb|\eqref|.
-Equations have to be numbered only if they are referenced in the text.
+\subsection{Functions on edges}
 
-Equations~\eqref{eq:maxwell_multilabels1}, \eqref{eq:maxwell_multilabels2}, \eqref{eq:maxwell_multilabels3}, and \eqref{eq:maxwell_multilabels4} show again Maxwell's equations without brace:
-\begin{align}
-    \nabla\cdot \bm{D} & = \rho, \label{eq:maxwell_multilabels1} \\
-    \nabla \times \bm{E} +  \frac{\partial \bm{B}}{\partial t} &= \bm{0}, \label{eq:maxwell_multilabels2} \\
-    \nabla\cdot \bm{B} & = 0, \label{eq:maxwell_multilabels3} \\
-    \nabla \times \bm{H} - \frac{\partial \bm{D}}{\partial t} &= \bm{J} \label{eq:maxwell_multilabels4}.
-\end{align}
-
-Equation~\eqref{eq:maxwell_singlelabel} is the same as before,
-but with just one label:
+A KAN layer can be read as a collection of edge functions.
+For every pair of input node $i$ and output node $j$, the layer contains a learnable univariate function $\phi_{i,j}$.
+This function receives only the scalar value $x_i$ and produces the contribution of that edge.
+The output node is then obtained by summing all contributions that arrive from the previous layer:
 \begin{equation}
-    \label{eq:maxwell_singlelabel}
-    \left\{
-    \begin{aligned}
-    \nabla\cdot \bm{D} & = \rho, \\
-    \nabla \times \bm{E} +  \frac{\partial \bm{B}}{\partial t} &= \bm{0},\\
-    \nabla\cdot \bm{B} & = 0, \\
-    \nabla \times \bm{H} - \frac{\partial \bm{D}}{\partial t} &= \bm{J}.
-    \end{aligned}
-    \right.
+    y_j = \sum_{i=1}^{n_{\mathrm{in}}} \phi_{i,j}(x_i).
+    \label{eq:kan_layer_simple}
 \end{equation}
+This equation is the most useful way to read a KAN for implementation purposes.
+Every edge is a small function evaluator, and every node is an accumulator.
 
-%-----------------------------------------------------------------------------
-% FIGURES, TABLES AND ALGORITHMS
-%-----------------------------------------------------------------------------
-\section{Figures, Tables and Algorithms}
+The practical consequence is that the basic inference operation is the repeated evaluation of small scalar functions.
+For a CPU, and therefore for a simulator such as gem5, the cost of a KAN depends not only on the number of learned parameters, but also on how spline bases, coefficients, and temporary activations are stored and reused.
 
-Figures, Tables and Algorithms have to contain a Caption that describes their content, and have to be properly referred in the text.
+\subsection{Edge parametrization and the NASA configuration}
 
-\subsection{Figures}
-\label{subsec:figures}
+In a KAN layer, each edge does not store a single scalar weight.
+Instead, the edge from node $i$ to node $j$ represents a learnable univariate function
+$\phi_{i,j}$ applied to the scalar input $x_i$.
+For the implementation considered in this work, this edge function can be read as the combination of two branches:
+\begin{equation}
+    \phi_{i,j}(x_i)
+    =
+    m_{i,j}
+    \left[
+        s^{\mathrm{base}}_{i,j} b(x_i)
+        +
+        s^{\mathrm{spline}}_{i,j} S_{i,j}(x_i)
+    \right],
+    \label{eq:edge_function}
+\end{equation}
+where $m_{i,j}$ is an optional edge mask, 
+$s^{\mathrm{base}}_{i,j}$ and $s^{\mathrm{spline}}_{i,j}$ are learnable scale factors, 
+$b(\cdot)$ is a fixed base activation, and $S_{i,j}$ is the learnable spline component.
 
-For including pictures in your text you can use \texttt{TikZ} for high-quality hand-made figures \cite{tikz},
-or just include them with the command
+\textbf{Base branch.}
+The term
+\begin{equation}
+    s^{\mathrm{base}}_{i,j} b(x_i)
+\end{equation}
+is the base branch.
+It gives the edge a simple smooth response before the spline contribution is added.
+The activation function $b(\cdot)$ is fixed: its shape is not learned during training.
+What is learned is the scalar coefficient $s^{\mathrm{base}}_{i,j}$, which decides how strongly this fixed response contributes to the edge.
+
+In the NASA experiment, the base activation is SiLU:
+\begin{equation}
+    b(x) = \frac{x}{1 + e^{-x}}.
+\end{equation}
+SiLU is a smooth nonlinear function.
+For large positive inputs it behaves approximately like the identity, while for negative inputs it smoothly attenuates the value instead of applying a hard cutoff.
+In this context, the activation function is not applied after a whole layer.
+It is part of the edge function itself: it provides a stable low-complexity contribution, and the spline branch can then model more local corrections.
+
+\textbf{Spline branch.}
+The term
+\begin{equation}
+    s^{\mathrm{spline}}_{i,j} S_{i,j}(x_i)
+\end{equation}
+is the spline branch.
+This is the flexible part of the edge function.
+The shape of $S_{i,j}$ is learned through B-spline coefficients, so different edges can represent different scalar functions.
+The scale $s^{\mathrm{spline}}_{i,j}$ controls the magnitude of this learned contribution.
+
+\textbf{Mask and scale factors.}
+The two scale factors balance the two branches.
+If $s^{\mathrm{base}}_{i,j}$ is large, the edge relies more on the fixed SiLU response.
+If $s^{\mathrm{spline}}_{i,j}$ is large, the edge relies more on the learned spline shape.
+The mask $m_{i,j}$ acts as a gate on the whole edge: when it is zero, the edge contribution is removed; when it is one, the edge is active.
+
+\textbf{Initialization in the NASA model.}
+For the NASA model used in this project, these quantities are initialized by the KAN library rather than manually overwritten by our training script.
+Since sparse initialization is not enabled, the mask is initialized to one for every edge and is not trainable.
+Therefore all edges start active and remain active in the exported NASA model.
+The base scale is initialized randomly for each edge in a range proportional to $1/\sqrt{n_{\mathrm{in}}}$, and is trainable.
+The spline scale is initialized to $1/\sqrt{n_{\mathrm{in}}}$ on each active edge and is also trainable.
+Consequently, after training, the NASA export contains both non-zero base scales and non-zero spline scales, so inference uses both the SiLU branch and the spline branch.
+
+\subsection{Spline representation}
+
+The spline term $S_{i,j}(x)$ is represented as a linear combination of B-spline basis functions:
+\begin{equation}
+    S_{i,j}(x)
+    =
+    \sum_{r=0}^{M-1}
+    c_{i,j,r} B_{r,p}(x).
+    \label{eq:spline_expansion}
+\end{equation}
+The coefficients $c_{i,j,r}$ are the control points learned during training.
+The functions $B_{r,p}(x)$ are B-spline bases of degree $p$, and $M$ is the number of control points associated with the edge.
+In this project, we use cubic splines, corresponding to degree $p=3$.
+
+The bases are defined over a knot vector
+\begin{equation}
+    \bm{t} = [t_0,t_1,\ldots,t_{K-1}],
+\end{equation}
+which partitions the input domain into intervals.
+When the knot vector is uniform, the full vector does not need to be stored explicitly.
+If the first knot and the spacing are known, each knot can be reconstructed as
+\begin{equation}
+    t_r = t_0 + r\Delta t.
+\end{equation}
+Using this compact representation reduces static model data and simplifies the inference code.
+
+\subsection{Basis activation and locality}
+
+A degree-zero B-spline basis is an indicator function.
+It is active only on its own interval:
+\begin{equation}
+B_{r,0}(x) =
+\begin{cases}
+1, & t_r \le x < t_{r+1},\\
+0, & \text{otherwise}.
+\end{cases}
+\end{equation}
+Higher-degree bases are obtained through the Cox-de Boor recurrence:
+\begin{equation}
+B_{r,p}(x)
+=
+\frac{x-t_r}{t_{r+p}-t_r} B_{r,p-1}(x)
++
+\frac{t_{r+p+1}-x}{t_{r+p+1}-t_{r+1}} B_{r+1,p-1}(x).
+\label{eq:cox_de_boor}
+\end{equation}
+The key property is locality.
+At any input value $x$, a B-spline of degree $p$ activates at most $p+1$ basis functions.
+For cubic splines this means that only four bases can be non-zero:
+\begin{equation}
+    p = 3
+    \qquad \Rightarrow \qquad
+    p+1 = 4.
+\end{equation}
+Therefore, even if an edge stores several control points, one inference step only needs the four coefficients whose support overlaps the current input value.
+The spline evaluation can be written as
+\begin{equation}
+    S_{i,j}(x)
+    =
+    c_{i,j,q} b_0(x)
+    +
+    c_{i,j,q+1} b_1(x)
+    +
+    c_{i,j,q+2} b_2(x)
+    +
+    c_{i,j,q+3} b_3(x),
+    \label{eq:local_spline}
+\end{equation}
+where $q$ depends on the interval of the knot vector that contains $x$.
+
+This observation is central from an implementation point of view.
+The spline branch of an edge can be reduced to a four-element dot product between local coefficients and local basis values:
+\begin{equation}
+    \text{spline}(x) = \bm{c}_{4}^{T}\bm{b}_{4}(x).
+\end{equation}
+As a result, optimization is not only a matter of reducing arithmetic operations.
+It is also a matter of placing the four coefficients close together in memory, avoiding unnecessary basis evaluations, and reusing the same local bases across all outgoing edges of the same input node.
+
+\subsection{Composition across layers}
+
+A full KAN is obtained by composing several layers.
+If $\bm{x}^{(\ell)}$ is the activation vector of layer $\ell$, the next layer is computed as
+\begin{equation}
+    x^{(\ell+1)}_j
+    =
+    \sum_{i=1}^{n_{\ell}}
+    \phi^{(\ell)}_{i,j}
+    \left(
+        x^{(\ell)}_i
+    \right).
+\end{equation}
+The same formula applies independently of the input dimensionality.
+The first layer receives the input features, while later layers receive the activations produced by the previous layer.
+From the point of view of an inference program, the forward pass is a repeated pattern of edge evaluation and accumulation.
+
+\section{Pipeline of a Single Input Sample}
+\label{sec:single_data_pipeline}
+
+\subsection{From training to a RISC-V executable}
+
+Training is performed in Python, where the model is represented with PyTorch tensors and high-level KAN modules.
+
+After training, the parameters are exported into an intermediate model file.
+This file contains the information needed to rebuild the forward pass outside Python: layer widths, spline degree, compact knot metadata, control points, scale factors, masks, and dataset-specific metadata such as input dimension or target scaling.
+The inference program does not read this file at runtime.
+Instead, a generation script translates the exported parameters into C headers containing static \texttt{const} arrays.
+
+The offline path is therefore
+\begin{equation}
+\text{Python training}
+\rightarrow
+\text{model export}
+\rightarrow
+\text{C header}
+\rightarrow
+\text{cross-compilation}
+\rightarrow
+\text{RISC-V ELF binary}.
+\end{equation}
+This choice keeps the simulated program small and deterministic.
+When gem5 starts the executable, all model parameters are already part of the binary.
+There is no filesystem parsing, no JSON reader, and no dynamic model loading inside the measured inference path.
+
+\subsection{Where the model lives in memory}
+
+The generated arrays are declared as constant data.
+The compiler therefore places them in the read-only data section of the ELF binary, usually named \texttt{.rodata}.
+The executable is organized into the usual regions:
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+Region & Content & Role during inference \\
+\midrule
+\texttt{.text} & compiled instructions & fetched through the instruction cache \\
+\texttt{.rodata} & KAN coefficients and metadata & loaded through the data cache \\
+\texttt{.data} & initialized mutable globals & used only when needed \\
+\texttt{.bss} & zero-initialized globals & used only when needed \\
+stack & temporary buffers and local variables & reused during the forward pass \\
+heap & dynamic allocations, if present & avoided in the core inference path when possible \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+For this project, the most important distinction is between static model data and temporary runtime data.
+Spline coefficients, masks, knot metadata, and scale factors are stored in \texttt{.rodata}.
+Activation buffers such as \texttt{current[]} and \texttt{next[]} are runtime data and normally reside on the stack.
+
+\subsection{What gem5 sees before inference}
+
+The simulations are run in syscall emulation mode.
+In this mode, gem5 does not boot a complete operating system.
+It loads the ELF binary into the simulated process address space and starts executing it.
+At the beginning of the run, the program is present in simulated main memory, while the caches are initially empty:
 \begin{verbatim}
-\includegraphics[options]{filename.xxx}
+simulated DDR3:
+    .text
+    .rodata
+    .data
+    .bss
+    initial stack
+
+L1I: empty
+L1D: empty
+L2:  empty
 \end{verbatim}
-Here xxx is the correct format, e.g.  \verb|.png|, \verb|.jpg|, \verb|.eps|, \dots.
+The caches are filled only as the simulated CPU fetches instructions and performs loads or stores.
+This is why the first accesses to model parameters and code blocks may generate misses, while later accesses can benefit from locality.
 
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=0.3\textwidth]{logo_polimi_scritta.eps}
-    \caption{Caption of the Figure.}
-    \label{fig:quadtree}
-\end{figure}
+\subsection{Forward pass of one sample}
 
-Thanks to the \texttt{\textbackslash subfloat} command, a single figure, such as Figure~\ref{fig:quadtree},
-can contain multiple sub-figures with their own caption and label, e.g. Figure~\ref{fig:polimi_logo1} and Figure~\ref{fig:polimi_logo2}. 
+For a single input sample $\bm{x}$, the C implementation uses two activation buffers:
+\begin{verbatim}
+current[]
+next[]
+\end{verbatim}
+The buffer \texttt{current} stores the activations of the layer being processed.
+The buffer \texttt{next} accumulates the outputs of the next layer.
+At the end of the layer, the two roles are swapped or copied depending on the implementation.
 
-\begin{figure}[H]
-    \centering
-    \subfloat[One PoliMi logo.\label{fig:polimi_logo1}]{
-        \includegraphics[scale=0.5]{Images/logo_polimi_scritta.eps}
-    }
-    \quad
-    \subfloat[Another one PoliMi logo.\label{fig:polimi_logo2}]{
-        \includegraphics[scale=0.5]{Images/logo_polimi_scritta2.eps}
-    }
-    \caption[]{Caption of the Figure.}
-    \label{fig:quadtree2}
-\end{figure}
+The logical structure of the forward pass is:
+\begin{verbatim}
+current = input
 
-\subsection{Tables}
-\label{subsec:tables}
+for each layer:
+    clear next
+    for each input node:
+        compute the local spline bases for current[input]
+        compute the base activation for current[input]
+        for each output node:
+            read the edge parameters
+            evaluate the edge contribution
+            accumulate into next[output]
+    current = next
 
-Within the environments \texttt{table} and  \texttt{tabular} you can create very fancy tables as the one shown in Table~\ref{table:example}.
+return current[0]
+\end{verbatim}
+This loop structure mirrors the mathematical definition of a KAN layer.
+Each input activation is reused across all outgoing edges.
+For this reason, computing the local spline bases once per input node and reusing them for all output nodes is more efficient than recomputing the same bases for every edge.
 
-\begin{table}[H]
-    \caption*{\textbf{Example of Table (optional)}}
-    \centering 
-    \begin{tabular}{|p{3em} c c c |}
-    \hline
-    \rowcolor{bluePoli!40}
-     & \textbf{column1} & \textbf{column2} & \textbf{column3} \T\B \\
-    \hline \hline
-    \textbf{row1} & 1 & 2 & 3 \T\B \\
-    \textbf{row2} & $\alpha$ & $\beta$ & $\gamma$ \T\B\\
-    \textbf{row3} & alpha & beta & gamma \B\\
-    \hline
-    \end{tabular}
-    \\[10pt]
-    \caption{Caption of the Table.}
-    \label{table:example}
-\end{table}
+\subsection{Path of one spline coefficient}
 
-You can also consider to highlight selected columns or rows in order to make tables more readable.
-Moreover, with the use of \texttt{table*} and the option \texttt{bp} it is possible to align them at the bottom of the page. One example is presented in Table~\ref{table:exampleC}. 
+Consider one spline coefficient stored as a \texttt{float}.
+It occupies four bytes in the generated model arrays.
+Before execution it is part of the ELF file; once gem5 loads the program, it resides in the simulated main memory inside the \texttt{.rodata} region.
 
-\begin{table*}[bp]
-\centering 
-    \begin{tabular}{|p{3em} | c | c | c | c | c | c|}
-    \hline
-%    \rowcolor{bluePoli!40}
-     & \textbf{column1} & \textbf{column2} & \textbf{column3} & \textbf{column4} & \textbf{column5} & \textbf{column6} \T\B \\
-    \hline \hline
-    \textbf{row1} & 1 & 2 & 3 & 4 & 5 & 6 \T\B\\
-    \textbf{row2} & a & b & c & d & e & f \T\B\\
-    \textbf{row3} & $\alpha$ & $\beta$ & $\gamma$ & $\delta$ & $\phi$ & $\omega$ \T\B\\
-    \textbf{row4} & alpha & beta & gamma & delta & phi & omega \B\\
-    \hline
-    \end{tabular}
-    \\[10pt]
-    \caption{Highlighting the columns}
-    \label{table:exampleC}
-\end{table*}
+When the simulated CPU needs this coefficient, the data path is
+\begin{verbatim}
+simulated DDR3
+    -> L2 cache
+    -> L1D cache
+    -> CPU/FPU register
+\end{verbatim}
+If the caches do not already contain the cache line, the load misses in L1D, then in L2, and finally reaches simulated memory.
+The memory system does not bring back a single float.
+It brings back a whole cache line.
+With a 64-byte line, one miss can load up to sixteen contiguous \texttt{float} values.
 
-\subsection{Algorithms}
-\label{subsec:algorithms}
+This detail explains why the memory layout of the model matters.
+If coefficients that are used together are contiguous, one cache miss can provide several useful values.
+If the layout is scattered or padded, the program may touch more cache lines than necessary.
+For a KAN, where many small edge functions are evaluated repeatedly, this effect can become as important as the arithmetic count.
 
-Pseudo-algorithms can be written in \LaTeX{} with the \texttt{algorithm} and \texttt{algorithmic} packages.
-An example is shown in Algorithm~\ref{alg:var}.
-\begin{algorithm}[H]
-\label{alg:example}
-\caption{Name of the Algorithm}
-\label{alg:var}
-\label{protocol1}
-\begin{algorithmic}[1]
-\STATE Initial instructions
-\FOR{$for-condition$}
-\STATE{Some instructions}
-\IF{$if-condition$}
-\STATE{Some other instructions}
-\ENDIF
-\ENDFOR
-\WHILE{$while-condition$}
-\STATE{Some further instructions}
-\ENDWHILE
-\STATE Final instructions
-\end{algorithmic}
-\end{algorithm} 
+\subsection{Path of instructions and temporary data}
 
-\section{Some further useful suggestions}
+The compiled inference functions are stored in \texttt{.text}.
+Their path through the memory hierarchy is separate from the data path:
+\begin{verbatim}
+simulated DDR3
+    -> L2 cache
+    -> L1I cache
+    -> fetch/decode/execute
+\end{verbatim}
+During inference there are therefore two main streams.
+Instructions flow from \texttt{.text} into the instruction cache.
+Model parameters and temporary buffers flow through the data cache.
 
-Theorems have to be formatted as follows:
-\begin{theorem}
-\label{a_theorem}
-Write here your theorem. 
-\end{theorem}
-\textit{Proof.} If useful you can report here the proof.
-\vspace{0.3cm} % Insert vertical space
+The activation buffers and local basis values are small and repeatedly reused.
+After the first accesses, they are likely to remain close to the processor in L1D.
+The larger and more structured part of the memory traffic comes from the model arrays: coefficients, scale factors, masks, and metadata.
+This separation is useful when interpreting gem5 statistics, because instruction misses and data misses describe different aspects of the same inference.
 
-Propositions have to be formatted as follows:
-\begin{proposition}
-Write here your proposition.
-\end{proposition}
-\vspace{0.3cm} % Insert vertical space
+\subsection{Complete sample path}
 
-How to insert itemized lists:
+Putting the pieces together, the path of a model parameter is
+\begin{equation}
+\text{export}
+\rightarrow
+\text{C header}
+\rightarrow
+\text{RISC-V ELF}
+\rightarrow
+\text{simulated DDR3}
+\rightarrow
+\text{L2}
+\rightarrow
+\text{L1D}
+\rightarrow
+\text{register}.
+\end{equation}
+The path of an input sample is
+\begin{equation}
+\bm{x}
+\rightarrow
+\texttt{current}
+\rightarrow
+\text{edge evaluation}
+\rightarrow
+\texttt{next}
+\rightarrow
+\cdots
+\rightarrow
+\hat{y}.
+\end{equation}
+The two paths meet inside the edge evaluator.
+The input activation selects the active spline interval, the local basis values are computed, the relevant coefficients are read, and the resulting edge contribution is accumulated into the next layer.
+
+This view is useful because it connects the abstract KAN equations with the events measured by gem5.
+An optimization that removes unnecessary basis evaluations reduces arithmetic work.
+An optimization that stores uniform knots compactly reduces static data.
+An optimization that places edge parameters contiguously can reduce cache traffic.
+All three choices are part of the same deployment problem.
+
+\section{Implementation Work to Be Expanded}
+\label{sec:implementations_placeholder}
+
 \begin{itemize}
-    \item first item;
-    \item second item.
+    \item \textbf{Model export from training.}
+    The Python training code exports the learned KAN parameters into a format that can be translated into C headers and included in the gem5 inference binary.
+
+    \item \textbf{Clean gem5 measurement.}
+    The inference executable separates initialization, optional warm-up, metric computation, and printing from the measured region.
+    The actual forward-pass loop is isolated with gem5 statistics reset and dump operations, so that the reported cycles, instructions, and cache events refer as closely as possible to inference only.
+
+    \item \textbf{Compact knot representation.}
+    Uniform knot vectors do not need to be stored explicitly for every edge.
+    When their structure is regular, the inference code can reconstruct them from a small set of parameters.
+
+    \item \textbf{Local active B-spline evaluation.}
+    Since the project uses cubic splines, only four basis functions can be active for a given input value.
+    The optimized evaluator therefore finds the active knot interval and computes only the four local basis values needed by that interval, instead of combining all the control points of an edge.
+
+    \item \textbf{Coefficient layout by local interval.}
+    The natural mathematical layout stores all control points of an edge.
+    A more hardware-friendly layout stores the four coefficients required by each interval as a local \texttt{coeff4} packet, so that the kernel can load exactly the values used by the current spline segment.
+
+    \item \textbf{Basis lookup table.}
+    Local basis values depend on the fractional position of the input inside the active interval, not on the specific edge.
+    A small lookup table can therefore store precomputed basis quadruples, reducing the amount of runtime spline arithmetic.
+
+    \item \textbf{Memory layout of edge parameters.}
+    Coefficients, scale factors, and masks are arranged in flat arrays so that the edge evaluator can access them with simple index arithmetic and predictable memory behavior.
+    This layout also prepares the code for packed coefficient loads and for tiled execution.
+
+    \item \textbf{Quantization at multiple levels.}
+    Quantization is considered both on the training side and on the inference side.
+    The training pipeline can produce quantized model artifacts and the corresponding scale information, while the C inference code can execute quantized variants of the model.
+    The main variants are based on INT8 coefficients, INT8 or INT16 basis values, and INT32 accumulation.
+
+    \item \textbf{Packed INT8 representation.}
+    Once only four coefficients and four basis values are needed, they can be packed into 32-bit words.
+    This representation reduces memory traffic and creates a direct mapping between cubic spline evaluation and packed integer arithmetic.
+
+    \item \textbf{Scalar \texttt{dot4} kernel.}
+    Before modifying the simulated processor, a pure C \texttt{dot4\_scalar} routine can validate the packed representation.
+    It unpacks four signed 8-bit coefficients and four signed 8-bit basis values from two 32-bit words and accumulates their products into an INT32 result.
+
+    \item \textbf{Custom \texttt{KAN.DOT4} instruction.}
+    The packed kernel motivates a RISC-V custom instruction that computes the four INT8 products and their sum in one operation.
+    In the intended design, one source register contains the packed coefficients, the other contains the packed basis values, and the destination register receives the accumulated dot product.
+
+    \item \textbf{Scratchpad memory.}
+    A software-managed scratchpad can be added to the gem5 system as a memory-mapped region.
+    Compact data such as basis lookup tables, coefficient tiles, input tiles, and accumulation buffers can then be moved close to the core before running the kernel.
+
+    \item \textbf{Tiled scratchpad execution and double buffering.}
+    After the scratchpad version is available, the computation can be organized in tiles.
+    Two scratchpad buffers can be alternated so that one tile is processed while the next tile is prepared, reducing the visible cost of data movement.
+
+    \item \textbf{Batching of multiple inputs.}
+    Instead of evaluating one input sample at a time, the inference loop can process small batches.
+    This improves coefficient reuse across samples and can increase the arithmetic work performed per memory access, especially after the local, packed, and quantized kernels are in place.
 \end{itemize}
-How to write numbered lists:
-\begin{enumerate}
-    \item first item;
-    \item second item.
-\end{enumerate}
 
-\section{Use of copyrighted material}
-
-Each student is responsible for obtaining copyright permissions, if necessary, to include published material in the thesis.
-This applies typically to third-party material published by someone else.
-
-\section{Plagiarism}
-
-You have to be sure to respect the rules on Copyright and avoid an involuntary plagiarism.
-It is allowed to take other persons' ideas only if the author and his original work are clearly mentioned.
-As stated in the Code of Ethics and Conduct, Politecnico di Milano \textit{promotes the integrity of research,
-condemns manipulation and the infringement of intellectual property}, and gives opportunity to all those
-who carry out research activities to have an adequate training on ethical conduct and integrity while doing research.
-To be sure to respect the copyright rules, read the guides on Copyright legislation and citation styles available
-at:
-\begin{verbatim}
-https://www.biblio.polimi.it/en/tools/courses-and-tutorials
-\end{verbatim}
-You can also attend the courses which are periodically organized on "Bibliographic citations and bibliography management".
-
-%-----------------------------------------------------------------------------
-% CONCLUSION
-%-----------------------------------------------------------------------------
-\section{Conclusions}
-\color{black}
-A final section containing the main conclusions of your research/study
-and possible future developments of your work have to be inserted in the section ``Conclusions''.
-
-\section{Bibliography and citations}
-Your thesis must contain a suitable Bibliography which lists all the sources consulted on developing the work.
-The list of references is placed at the end of the manuscript after the chapter containing the conclusions.
-It is suggested to use the BibTeX package and save the bibliographic references in the file \verb|bibliography.bib|.
-This is indeed a database containing all the information about the references. To cite in your manuscript, use the \verb|\cite{}| command as follows:
-\\
-\textit{Here is how you cite bibliography entries: \cite{knuth74}, or multiple ones at once: \cite{knuth92,lamport94}}.
-\\
-The bibliography and list of references are generated automatically by running BibTeX \cite{bibtex}.
-
-%-----------------------------------------------------------------------------
-% BIBLIOGRAPHY
-%-----------------------------------------------------------------------------
-\bibliography{bibliography.bib}
-
-\appendix
-\section{Appendix A}
-If you need to include an appendix to support the research in your thesis, you can place it at the end of the manuscript.
-An appendix contains supplementary material (figures, tables, data, codes, mathematical proofs, surveys, \dots)
-which supplement the main results contained in the previous sections.
-
-\section{Appendix B}
-It may be necessary to include another appendix to better organize the presentation of supplementary material.
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%     ABSTRACT IN ITALIAN LANGUAGE AND ACKNOWLEDGMENTS     %%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\cleardoublepage
-
-%-----------------------------------------------------------------------------
-% SOMMARIO
-%-----------------------------------------------------------------------------
-\section*{Abstract in lingua italiana}
-Qui va l'Abstract in lingua italiana della tesi seguito dalla lista di parole chiave.
-\vspace{15pt}
-\begin{tcolorbox}[arc=0pt, boxrule=0pt, colback=bluePoli!60, width=\textwidth, colupper=white]
-    \textbf{Parole chiave:} qui, le parole chiave, della tesi, in italiano 
-\end{tcolorbox}
-
-%-----------------------------------------------------------------------------
-% ACKNOWLEDGEMENTS
-%-----------------------------------------------------------------------------
-\section*{Acknowledgements}
-Here you might want to acknowledge someone.
-
-%-------------------------------------------------------------------------
-%	END OF YOUR DOCUMENT
-%-------------------------------------------------------------------------
 \end{document}
