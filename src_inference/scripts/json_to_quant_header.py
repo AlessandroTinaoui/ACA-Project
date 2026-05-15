@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 from pathlib import Path
 
 
@@ -27,8 +26,13 @@ def parse_args() -> argparse.Namespace:
         default="nasa_quant16",
         help="Model alias or JSON path.",
     )
-    parser.add_argument("--bits", type=int, default=16, help="Integer bit-width for the generated header.")
-    parser.add_argument("--lut-size", type=int, default=4096, help="Per-support LUT size.")
+    parser.add_argument("--bits", type=int, default=16, help="Integer bit-width for quantized weights.")
+    parser.add_argument(
+        "--lut-size",
+        type=int,
+        default=0,
+        help="Deprecated compatibility flag. Ignored because spline basis is evaluated at runtime.",
+    )
     parser.add_argument("--output", type=Path, default=HEADER_PATH, help="Output header path.")
     return parser.parse_args()
 
@@ -39,7 +43,7 @@ def resolve_model_path(model: str) -> Path:
     else:
         candidate = Path(model)
         if not candidate.is_absolute():
-            candidate = (ROOT / candidate).resolve()
+            candidate = ROOT / candidate
 
     candidate = candidate.resolve()
     if candidate.is_dir():
@@ -76,7 +80,7 @@ def c_float(value: float) -> str:
     return f"{text}f"
 
 
-def format_int_array(values: list[int], indent: str, chunk_size: int = 16) -> str:
+def format_1d_int_array(values: list[int], indent: str, chunk_size: int = 16) -> str:
     lines = []
     for index in range(0, len(values), chunk_size):
         chunk = values[index : index + chunk_size]
@@ -84,12 +88,22 @@ def format_int_array(values: list[int], indent: str, chunk_size: int = 16) -> st
     return ",\n".join(lines) if lines else indent + "0"
 
 
-def format_float_array(values: list[float], indent: str, chunk_size: int = 8) -> str:
+def format_1d_float_array(values: list[float], indent: str, chunk_size: int = 8) -> str:
     lines = []
     for index in range(0, len(values), chunk_size):
         chunk = values[index : index + chunk_size]
         lines.append(indent + ", ".join(c_float(value) for value in chunk))
     return ",\n".join(lines) if lines else indent + "0.0f"
+
+
+def format_2d_float_array(values: list[list[float]], indent: str) -> str:
+    rows = []
+    inner_indent = indent + "    "
+    for row in values:
+        rows.append(
+            indent + "{\n" + format_1d_float_array(row, inner_indent) + "\n" + indent + "}"
+        )
+    return ",\n".join(rows)
 
 
 def is_uniform_knot_vector(knots: list[float], tolerance: float = 1e-5) -> bool:
@@ -104,60 +118,84 @@ def is_uniform_knot_vector(knots: list[float], tolerance: float = 1e-5) -> bool:
     return True
 
 
-def silu(x: float) -> float:
-    return x / (1.0 + math.exp(-x))
+def all_close_to(values: list[float], expected: float, tolerance: float = 1e-7) -> bool:
+    return all(abs(float(value) - expected) <= tolerance for value in values)
 
 
-def clamp_to_qmax(value: int, qmax: int) -> int:
-    return max(-qmax, min(qmax, value))
-
-
-def bspline_basis_values(
-    x: float,
-    knots: list[float],
-    degree: int,
-    num_control_points: int,
-) -> list[float]:
-    if x >= knots[-1]:
-        x = math.nextafter(knots[-1], knots[0])
-
-    num_intervals = len(knots) - 1
-    prev = [0.0] * num_intervals
-    for index in range(num_intervals):
-        if knots[index] <= x < knots[index + 1]:
-            prev[index] = 1.0
-
-    for order in range(1, degree + 1):
-        curr = [0.0] * num_intervals
-        for index in range(num_intervals - order):
-            left = 0.0
-            left_den = knots[index + order] - knots[index]
-            if left_den > 0.0:
-                left = ((x - knots[index]) / left_den) * prev[index]
-
-            right = 0.0
-            right_den = knots[index + order + 1] - knots[index + 1]
-            if right_den > 0.0:
-                right = ((knots[index + order + 1] - x) / right_den) * prev[index + 1]
-
-            curr[index] = left + right
-        prev = curr
-
-    return prev[:num_control_points]
-
-
-def quantize_with_scale(value: float, scale: float, qmax: int) -> int:
+def quantize_symmetric(value: float, scale: float, qmax: int) -> int:
     if scale <= 0.0:
         return 0
-    return clamp_to_qmax(int(round(value / scale)), qmax)
+    quantized = int(round(value / scale))
+    return max(-qmax, min(qmax, quantized))
+
+
+def build_dense_knots(
+    layers: list[dict],
+    num_layers: int,
+    max_input_dim: int,
+    num_knots: int,
+) -> list[list[list[float]]]:
+    dense_knots: list[list[list[float]]] = []
+    for layer in layers:
+        input_dim = int(layer["input_dim"])
+        layer_knots = [[0.0] * num_knots for _ in range(max_input_dim)]
+        raw_knots = layer["knots"]
+        if len(raw_knots) != input_dim:
+            raise ValueError(
+                f"layer {layer['layer_index']}: expected {input_dim} knot vectors, found {len(raw_knots)}"
+            )
+        for input_index, knot_vector in enumerate(raw_knots):
+            if len(knot_vector) != num_knots:
+                raise ValueError(
+                    f"layer {layer['layer_index']}: expected {num_knots} knots, found {len(knot_vector)}"
+                )
+            layer_knots[input_index] = [float(value) for value in knot_vector]
+        dense_knots.append(layer_knots)
+
+    if len(dense_knots) != num_layers:
+        raise ValueError(f"expected {num_layers} layers, built {len(dense_knots)}")
+    return dense_knots
+
+
+def build_knot_metadata(
+    dense_knots: list[list[list[float]]],
+    layer_input_dims: list[int],
+    max_input_dim: int,
+) -> tuple[list[list[float]], list[list[float]], list[list[float]], bool]:
+    knot_bases: list[list[float]] = []
+    knot_deltas: list[list[float]] = []
+    knot_inv_deltas: list[list[float]] = []
+    all_active_uniform = True
+
+    for layer_index, layer_knots in enumerate(dense_knots):
+        layer_bases: list[float] = []
+        layer_deltas: list[float] = []
+        layer_inv_deltas: list[float] = []
+        input_dim = layer_input_dims[layer_index]
+
+        for input_index in range(max_input_dim):
+            knot_vector = layer_knots[input_index]
+            active = input_index < input_dim
+            uniform = active and is_uniform_knot_vector(knot_vector)
+            delta = float(knot_vector[1]) - float(knot_vector[0]) if uniform else 0.0
+            if active and not uniform:
+                all_active_uniform = False
+
+            layer_bases.append(float(knot_vector[0]) if uniform else 0.0)
+            layer_deltas.append(delta)
+            layer_inv_deltas.append(1.0 / delta if uniform and delta != 0.0 else 0.0)
+
+        knot_bases.append(layer_bases)
+        knot_deltas.append(layer_deltas)
+        knot_inv_deltas.append(layer_inv_deltas)
+
+    return knot_bases, knot_deltas, knot_inv_deltas, all_active_uniform
 
 
 def main() -> None:
     args = parse_args()
     if args.bits < 2 or args.bits > 16:
         raise ValueError(f"--bits must be in [2, 16], got {args.bits}")
-    if args.lut_size <= 0:
-        raise ValueError(f"--lut-size must be positive, got {args.lut_size}")
 
     json_path = resolve_model_path(args.model)
     with json_path.open("r", encoding="utf-8") as handle:
@@ -173,127 +211,77 @@ def main() -> None:
     target_scale = float(data.get("target_scale", 1.0))
     layers = normalize_layers(data)
     num_layers = len(layers)
-    max_input_dim = max(int(layer["input_dim"]) for layer in layers)
-    max_output_dim = max(int(layer["output_dim"]) for layer in layers)
-    max_layer_width = max(width)
-    num_layer_slots = num_layers * max_input_dim
-    num_edge_slots = num_layers * max_input_dim * max_output_dim
-    qmax = (1 << (args.bits - 1)) - 1
 
     if degree != 3:
         raise ValueError(
             f"The current integer KAN runtime supports only cubic splines (degree 3), got {degree}."
         )
 
-    activation_scales = data.get("quantization", {}).get("activation", {}).get("scales", {})
-    layer_input_amax = [float(activation_scales.get(f"act_fun.{index}", 0.0)) for index in range(num_layers)]
+    max_input_dim = max(int(layer["input_dim"]) for layer in layers)
+    max_output_dim = max(int(layer["output_dim"]) for layer in layers)
+    max_layer_width = max(width)
+    qmax = (1 << (args.bits - 1)) - 1
+
     layer_input_dims = [int(layer["input_dim"]) for layer in layers]
     layer_output_dims = [int(layer["output_dim"]) for layer in layers]
-    layer_edge_offsets: list[int] = []
+    num_edges = sum(layer_input_dims[index] * layer_output_dims[index] for index in range(num_layers))
+    activation_scales = data.get("quantization", {}).get("activation", {}).get("scales", {})
+    layer_input_amax = [float(activation_scales.get(f"act_fun.{index}", 0.0)) for index in range(num_layers)]
 
-    support_min = [0.0] * num_layer_slots
-    support_max = [0.0] * num_layer_slots
-    basis_first_cp = [0] * (num_layer_slots * args.lut_size)
-    basis_pack = [0] * (num_layer_slots * args.lut_size * 4)
-    base_lut = [0] * (num_layer_slots * args.lut_size)
-    coeff4_pack = [0] * (num_edge_slots * num_control_points * 4)
-    coeff_dequant = [0.0] * num_edge_slots
-    base_weight = [0] * num_edge_slots
-    base_dequant = [0.0] * num_edge_slots
+    dense_knots = build_dense_knots(
+        layers,
+        num_layers,
+        max_input_dim,
+        num_knots,
+    )
+    knot_bases, knot_deltas, knot_inv_deltas, all_active_knots_uniform = build_knot_metadata(
+        dense_knots,
+        layer_input_dims,
+        max_input_dim,
+    )
+    if not all_active_knots_uniform:
+        raise ValueError("The quantized runtime currently supports only uniform knots.")
 
-    edge_counter = 0
+    edge_offsets: list[int] = []
+    edge_control_points: list[list[int]] = []
+    edge_control_dequant: list[float] = []
+    edge_scale_base_q: list[int] = []
+    edge_scale_base_dequant: list[float] = []
+
     for layer_index, layer in enumerate(layers):
         input_size = int(layer["input_dim"])
         output_size = int(layer["output_dim"])
-        layer_edge_offsets.append(edge_counter)
+        raw_cp = layer["control_points"]
+        raw_scale_sp = layer["scale_sp"]
+        raw_scale_base = layer["scale_base"]
+        raw_mask = layer["mask"]
 
-        knots_matrix = layer["knots"]
-        control_points = layer["control_points"]
-        scale_sp = layer["scale_sp"]
-        scale_base = layer["scale_base"]
-        mask = layer["mask"]
-
-        for input_index in range(input_size):
-            knots = [float(value) for value in knots_matrix[input_index]]
-            if len(knots) != num_knots:
-                raise ValueError(
-                    f"Layer {layer_index} input {input_index}: expected {num_knots} knots, found {len(knots)}."
-                )
-            if not is_uniform_knot_vector(knots):
-                raise ValueError(
-                    f"Layer {layer_index} input {input_index}: non-uniform knots are not supported by the integer LUT path."
-                )
-
-            slot = layer_index * max_input_dim + input_index
-            slot_support_min = float(knots[0])
-            slot_support_max = float(knots[-1])
-            support_min[slot] = slot_support_min
-            support_max[slot] = slot_support_max
-
-            max_abs_base = max(abs(silu(slot_support_min)), abs(silu(slot_support_max)))
-            base_value_scale = max_abs_base / float(qmax) if max_abs_base > 0.0 else 0.0
-
-            for lut_index in range(args.lut_size):
-                if args.lut_size == 1:
-                    x = 0.5 * (slot_support_min + slot_support_max)
-                else:
-                    x = slot_support_min + (slot_support_max - slot_support_min) * (
-                        float(lut_index) / float(args.lut_size - 1)
-                    )
-
-                basis_values = bspline_basis_values(x, knots, degree, num_control_points)
-                non_zero = [idx for idx, value in enumerate(basis_values) if abs(value) > 1e-10]
-                first_cp = non_zero[0] if non_zero else 0
-                slot_lut_index = slot * args.lut_size + lut_index
-                basis_first_cp[slot_lut_index] = first_cp
-
-                for local_index in range(4):
-                    coeff_index = first_cp + local_index
-                    basis_value = basis_values[coeff_index] if coeff_index < num_control_points else 0.0
-                    basis_pack[slot_lut_index * 4 + local_index] = clamp_to_qmax(
-                        int(round(basis_value * float(qmax))),
-                        qmax,
-                    )
-
-                base_lut[slot_lut_index] = quantize_with_scale(silu(x), base_value_scale, qmax)
+        edge_offsets.append(len(edge_control_points))
 
         for input_index in range(input_size):
             for output_index in range(output_size):
-                slot = layer_index * max_input_dim + input_index
-                edge_slot = (layer_index * max_input_dim + input_index) * max_output_dim + output_index
-                edge_counter += 1
-
-                edge_mask = float(mask[input_index][output_index])
-                spline_weights = [
-                    edge_mask * float(scale_sp[input_index][output_index]) * float(value)
-                    for value in control_points[input_index][output_index]
+                mask = float(raw_mask[input_index][output_index])
+                cp_float = [
+                    mask * float(raw_scale_sp[input_index][output_index]) * float(value)
+                    for value in raw_cp[input_index][output_index]
                 ]
-                if len(spline_weights) != num_control_points:
-                    raise ValueError(
-                        f"Layer {layer_index} edge ({input_index}, {output_index}): "
-                        f"expected {num_control_points} control points, found {len(spline_weights)}."
-                    )
-                max_abs_spline = max((abs(value) for value in spline_weights), default=0.0)
-                spline_scale = max_abs_spline / float(qmax) if max_abs_spline > 0.0 else 0.0
-                coeff_dequant[edge_slot] = spline_scale / float(qmax) if spline_scale > 0.0 else 0.0
+                max_abs_cp = max((abs(value) for value in cp_float), default=0.0)
+                cp_scale = max_abs_cp / float(qmax) if max_abs_cp > 0.0 else 0.0
+                edge_control_points.append(
+                    [quantize_symmetric(value, cp_scale, qmax) for value in cp_float]
+                )
+                edge_control_dequant.append(cp_scale)
 
-                for first_cp in range(num_control_points):
-                    base_index = ((edge_slot * num_control_points) + first_cp) * 4
-                    for local_index in range(4):
-                        coeff_index = first_cp + local_index
-                        value = spline_weights[coeff_index] if coeff_index < num_control_points else 0.0
-                        coeff4_pack[base_index + local_index] = quantize_with_scale(value, spline_scale, qmax)
+                base_float = mask * float(raw_scale_base[input_index][output_index])
+                base_scale = abs(base_float) / float(qmax) if base_float != 0.0 else 0.0
+                edge_scale_base_q.append(quantize_symmetric(base_float, base_scale, qmax))
+                edge_scale_base_dequant.append(base_scale)
 
-                base_weight_value = edge_mask * float(scale_base[input_index][output_index])
-                max_abs_base = abs(base_weight_value)
-                base_weight_scale = max_abs_base / float(qmax) if max_abs_base > 0.0 else 0.0
-                base_weight[edge_slot] = quantize_with_scale(base_weight_value, base_weight_scale, qmax)
+    has_base_branch = not all_close_to(edge_scale_base_dequant, 0.0)
 
-                slot_base_scale = max(abs(silu(support_min[slot])), abs(silu(support_max[slot])))
-                slot_base_scale = slot_base_scale / float(qmax) if slot_base_scale > 0.0 else 0.0
-                base_dequant[edge_slot] = slot_base_scale * base_weight_scale
-
-    header = f"""#ifndef KAN_MODEL_QUANT_H
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(
+        f"""#ifndef KAN_MODEL_QUANT_H
 #define KAN_MODEL_QUANT_H
 
 #include <stdint.h>
@@ -302,7 +290,6 @@ def main() -> None:
  * Auto-generated by scripts/json_to_quant_header.py.
  * Source JSON: {json_path}
  * Quant bits: {args.bits}
- * LUT size: {args.lut_size}
  * Do not edit this file by hand.
  */
 
@@ -316,82 +303,69 @@ def main() -> None:
 #define KANQ_MAX_LAYER_WIDTH {max_layer_width}
 #define KANQ_MAX_INPUT_DIM {max_input_dim}
 #define KANQ_MAX_OUTPUT_DIM {max_output_dim}
-#define KANQ_NUM_EDGES {sum(layer_input_dims[index] * layer_output_dims[index] for index in range(num_layers))}
-#define KANQ_NUM_LAYER_SLOTS {num_layer_slots}
-#define KANQ_NUM_EDGE_SLOTS {num_edge_slots}
-#define KANQ_NUM_LOCAL_BASIS 4
+#define KANQ_NUM_EDGES {num_edges}
 #define KANQ_BITS {args.bits}
 #define KANQ_QMAX {qmax}
-#define KANQ_LUT_SIZE {args.lut_size}
-#define KANQ_BASE_BRANCH_ENABLED {1 if any(value != 0 for value in base_weight) else 0}
+#define KANQ_BASE_BRANCH_ENABLED {1 if has_base_branch else 0}
 
 static const float KANQ_TARGET_SCALE = {c_float(target_scale)};
 
 static const int KANQ_WIDTHS[KANQ_NUM_LAYERS + 1] = {{
-{format_int_array(width, "    ")}
+{format_1d_int_array(width, "    ")}
 }};
 
 static const int KANQ_LAYER_INPUT_DIMS[KANQ_NUM_LAYERS] = {{
-{format_int_array(layer_input_dims, "    ")}
+{format_1d_int_array(layer_input_dims, "    ")}
 }};
 
 static const int KANQ_LAYER_OUTPUT_DIMS[KANQ_NUM_LAYERS] = {{
-{format_int_array(layer_output_dims, "    ")}
+{format_1d_int_array(layer_output_dims, "    ")}
 }};
 
 static const int KANQ_LAYER_EDGE_OFFSETS[KANQ_NUM_LAYERS] = {{
-{format_int_array(layer_edge_offsets, "    ")}
+{format_1d_int_array(edge_offsets, "    ")}
 }};
 
 static const float KANQ_LAYER_INPUT_AMAX[KANQ_NUM_LAYERS] = {{
-{format_float_array(layer_input_amax, "    ")}
+{format_1d_float_array(layer_input_amax, "    ")}
 }};
 
-static const float KANQ_LAYER_SUPPORT_MIN[KANQ_NUM_LAYER_SLOTS] = {{
-{format_float_array(support_min, "    ")}
+static const float KANQ_LAYER_KNOT_BASE[KANQ_NUM_LAYERS][KANQ_MAX_INPUT_DIM] = {{
+{format_2d_float_array(knot_bases, "    ")}
 }};
 
-static const float KANQ_LAYER_SUPPORT_MAX[KANQ_NUM_LAYER_SLOTS] = {{
-{format_float_array(support_max, "    ")}
+static const float KANQ_LAYER_KNOT_DELTA[KANQ_NUM_LAYERS][KANQ_MAX_INPUT_DIM] = {{
+{format_2d_float_array(knot_deltas, "    ")}
 }};
 
-static const uint8_t KANQ_LAYER_BASIS_FIRST_CP[KANQ_NUM_LAYER_SLOTS * KANQ_LUT_SIZE] = {{
-{format_int_array(basis_first_cp, "    ", chunk_size=32)}
+static const float KANQ_LAYER_KNOT_INV_DELTA[KANQ_NUM_LAYERS][KANQ_MAX_INPUT_DIM] = {{
+{format_2d_float_array(knot_inv_deltas, "    ")}
 }};
 
-static const int16_t KANQ_LAYER_BASIS_PACK[KANQ_NUM_LAYER_SLOTS * KANQ_LUT_SIZE * KANQ_NUM_LOCAL_BASIS] = {{
-{format_int_array(basis_pack, "    ", chunk_size=24)}
+static const int16_t KANQ_EDGE_CONTROL_POINTS[KANQ_NUM_EDGES][KANQ_NUM_CONTROL_POINTS] = {{
+{",\n".join("    {" + ", ".join(str(value) for value in row) + "}" for row in edge_control_points)}
 }};
 
-static const int16_t KANQ_LAYER_BASE_LUT[KANQ_NUM_LAYER_SLOTS * KANQ_LUT_SIZE] = {{
-{format_int_array(base_lut, "    ", chunk_size=32)}
+static const float KANQ_EDGE_CONTROL_DEQUANT[KANQ_NUM_EDGES] = {{
+{format_1d_float_array(edge_control_dequant, "    ")}
 }};
 
-static const int16_t KANQ_LAYER_COEFF4_PACK[KANQ_NUM_EDGE_SLOTS * KANQ_NUM_CONTROL_POINTS * KANQ_NUM_LOCAL_BASIS] = {{
-{format_int_array(coeff4_pack, "    ", chunk_size=24)}
+static const int16_t KANQ_EDGE_SCALE_BASE_Q[KANQ_NUM_EDGES] = {{
+{format_1d_int_array(edge_scale_base_q, "    ")}
 }};
 
-static const float KANQ_LAYER_COEFF_DEQUANT[KANQ_NUM_EDGE_SLOTS] = {{
-{format_float_array(coeff_dequant, "    ")}
-}};
-
-static const int16_t KANQ_LAYER_BASE_WEIGHT[KANQ_NUM_EDGE_SLOTS] = {{
-{format_int_array(base_weight, "    ", chunk_size=24)}
-}};
-
-static const float KANQ_LAYER_BASE_DEQUANT[KANQ_NUM_EDGE_SLOTS] = {{
-{format_float_array(base_dequant, "    ")}
+static const float KANQ_EDGE_SCALE_BASE_DEQUANT[KANQ_NUM_EDGES] = {{
+{format_1d_float_array(edge_scale_base_dequant, "    ")}
 }};
 
 #endif /* KAN_MODEL_QUANT_H */
-"""
+""",
+        encoding="utf-8",
+    )
 
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(header, encoding="utf-8")
     print(f"Generated {args.output}")
     print(f"source_json = {json_path}")
     print(f"bits = {args.bits}")
-    print(f"lut_size = {args.lut_size}")
 
 
 if __name__ == "__main__":

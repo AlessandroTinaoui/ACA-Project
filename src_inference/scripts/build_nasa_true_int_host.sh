@@ -6,7 +6,6 @@ cd "$(dirname "$0")/.."
 BITS="${1:-16}"
 EXPORT_JSON="${2:-}"
 MAX_SAMPLES="${3:-128}"
-_UNUSED_LUT_SIZE="${4:-}"
 
 default_export_path() {
   case "$1" in
@@ -31,7 +30,7 @@ PREDICTIONS_CSV="${EXPORT_JSON%_export.json}_test_predictions.csv"
 
 mkdir -p build/host
 
-python3 scripts/json_to_quant_header.py "$EXPORT_JSON" --bits "$BITS"
+python3 scripts/json_to_true_int_header.py "$EXPORT_JSON" --bits "$BITS"
 if [[ -f "$PREDICTIONS_CSV" ]]; then
   python3 scripts/nasa_test_to_header.py --max-samples "$MAX_SAMPLES" --predictions "$PREDICTIONS_CSV"
 else
@@ -39,8 +38,9 @@ else
 fi
 
 gcc -O2 -Wall -Wextra -Iinclude \
-  src/nasa_quant_main.c src/kan_quant_inference.c \
+  src/nasa_true_int_main.c src/kan_true_int_inference.c \
   -lm \
-  -o "build/host/nasa_kan_demo_quant_int${BITS}_host"
+  -o "build/host/nasa_kan_demo_true_int${BITS}_host"
 
-echo "Built build/host/nasa_kan_demo_quant_int${BITS}_host"
+echo "Built build/host/nasa_kan_demo_true_int${BITS}_host"
+

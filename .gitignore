@@ -242,6 +242,7 @@ copy_temp*
 # Generated inference headers
 src_inference/include/kan_model.h
 src_inference/include/kan_model_quant.h
+src_inference/include/kan_model_true_int.h
 src_inference/include/mlp_model.h
 src_inference/include/nasa_test_data.h
 conic_metrics.csv

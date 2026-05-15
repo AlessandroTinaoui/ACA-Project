@@ -4,15 +4,15 @@
 #include <stdlib.h>
 
 #include "gem5_stats.h"
-#include "kan_model_quant.h"
-#include "kan_quant_inference.h"
+#include "kan_model_true_int.h"
+#include "kan_true_int_inference.h"
 #include "nasa_test_data.h"
 
-#ifndef KANQ_WARMUP_RUNS
-#define KANQ_WARMUP_RUNS 1
+#ifndef KATI_WARMUP_RUNS
+#define KATI_WARMUP_RUNS 1
 #endif
 
-static volatile float nasa_quant_benchmark_sink = 0.0f;
+static volatile float nasa_true_int_benchmark_sink = 0.0f;
 
 static int parse_n(int argc, char **argv) {
     if (argc < 2) {
@@ -39,18 +39,18 @@ static int parse_n(int argc, char **argv) {
 static void run_warmup(int n) {
     float sink = 0.0f;
 
-    for (int i = 0; i < KANQ_WARMUP_RUNS; ++i) {
-        sink += kan_quant_infer_vector(NASA_TEST_FEATURES[i % n]);
+    for (int i = 0; i < KATI_WARMUP_RUNS; ++i) {
+        sink += kan_true_int_infer_vector(NASA_TEST_FEATURES[i % n]);
     }
 
-    nasa_quant_benchmark_sink = sink;
+    nasa_true_int_benchmark_sink = sink;
 }
 
 static void run_measured_inference(float *predictions, int n) {
     kan_gem5_reset_stats();
 
     for (int i = 0; i < n; ++i) {
-        predictions[i] = kan_quant_infer_vector(NASA_TEST_FEATURES[i]) * KANQ_TARGET_SCALE;
+        predictions[i] = kan_true_int_infer_vector(NASA_TEST_FEATURES[i]) * KATI_TARGET_SCALE;
     }
 
     kan_gem5_dump_stats();
@@ -61,11 +61,11 @@ int main(int argc, char **argv) {
     if (n <= 0) {
         return 1;
     }
-    if (NASA_TEST_INPUT_DIM != KANQ_INPUT_DIM) {
+    if (NASA_TEST_INPUT_DIM != KATI_INPUT_DIM) {
         fprintf(stderr,
                 "NASA input dimension mismatch: data has %d, model expects %d\n",
                 NASA_TEST_INPUT_DIM,
-                KANQ_INPUT_DIM);
+                KATI_INPUT_DIM);
         return 1;
     }
 
@@ -75,20 +75,19 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    printf("NASA quantized KAN RISC-V demo\n");
+    printf("NASA true-int KAN RISC-V demo\n");
     printf("N = %d\n", n);
     printf("available_samples = %d\n", NASA_TEST_SAMPLES);
-    printf("input_dim = %d\n", KANQ_INPUT_DIM);
-    printf("num_layers = %d\n", KANQ_NUM_LAYERS);
-    printf("num_edges = %d\n", KANQ_NUM_EDGES);
-    printf("degree = %d\n", KANQ_DEGREE);
-    printf("num_control_points = %d\n", KANQ_NUM_CONTROL_POINTS);
-    printf("num_knots = %d\n", KANQ_NUM_KNOTS);
-    printf("num_intervals = %d\n", KANQ_NUM_INTERVALS);
-    printf("quant_bits = %d\n", KANQ_BITS);
-    printf("target_scale = %.9g\n", KANQ_TARGET_SCALE);
-    printf("measurement = kan_quant_infer_vector loop only\n");
-    printf("warmup_runs = %d\n\n", KANQ_WARMUP_RUNS);
+    printf("input_dim = %d\n", KATI_INPUT_DIM);
+    printf("num_layers = %d\n", KATI_NUM_LAYERS);
+    printf("num_edges = %d\n", KATI_NUM_EDGES);
+    printf("degree = %d\n", KATI_DEGREE);
+    printf("num_control_points = %d\n", KATI_NUM_CONTROL_POINTS);
+    printf("num_knots = %d\n", KATI_NUM_KNOTS);
+    printf("num_intervals = %d\n", KATI_NUM_INTERVALS);
+    printf("quant_bits = %d\n", KATI_BITS);
+    printf("measurement = kan_true_int_infer_vector loop only\n");
+    printf("warmup_runs = %d\n\n", KATI_WARMUP_RUNS);
     fflush(stdout);
 
     run_warmup(n);
@@ -133,10 +132,7 @@ int main(int argc, char **argv) {
                    y_true,
                    NASA_TEST_REFERENCE_PREDICTIONS[i]);
 #else
-            printf("sample[%d]: y_pred=%.9g y_true=%.9g\n",
-                   i,
-                   y_pred,
-                   y_true);
+            printf("sample[%d]: y_pred=%.9g y_true=%.9g\n", i, y_pred, y_true);
 #endif
         }
     }
@@ -155,3 +151,4 @@ int main(int argc, char **argv) {
     free(predictions);
     return 0;
 }
+

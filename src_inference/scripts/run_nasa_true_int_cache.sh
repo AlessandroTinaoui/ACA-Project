@@ -55,20 +55,21 @@ if [[ ! -x "$GEM5_BIN" ]]; then
 fi
 
 if [[ ! -f "$EXPORT_JSON" ]]; then
-  echo "Error: quantized NASA export not found: $EXPORT_JSON" >&2
+  echo "Error: true-int export source not found: $EXPORT_JSON" >&2
   exit 1
 fi
 
-bash scripts/build_nasa_quant_riscv.sh "$BITS" "$EXPORT_JSON" "$NUM_INPUTS"
+bash scripts/build_nasa_true_int_riscv.sh "$BITS" "$EXPORT_JSON" "$NUM_INPUTS"
 
 MODEL_STEM="$(basename "$EXPORT_JSON" .json)"
 if [[ -z "$RUN_NAME" ]]; then
-  RUN_NAME="$MODEL_STEM"
+  RUN_NAME="nasa_true_int${BITS}_${MODEL_STEM}"
 fi
-BINARY="build/riscv/nasa_kan_demo_quant_int${BITS}_riscv"
-OUTDIR="results/cache_quant_int${BITS}/$RUN_NAME"
+
+BINARY="build/riscv/nasa_kan_demo_true_int${BITS}_riscv"
+OUTDIR="results/cache_true_int${BITS}/$RUN_NAME"
 ARTIFACTS_ROOT="simulation_metrics"
-MODE_TAG="cache_l1_l2_quant_int${BITS}"
+MODE_TAG="cache_l1_l2_true_int${BITS}"
 RUN_TAG="riscv_se_${MODE_TAG}_${RUN_NAME}"
 REPORT_DIR="$ARTIFACTS_ROOT/$MODE_TAG/$RUN_NAME"
 REPORT_PATH="$REPORT_DIR/${RUN_TAG}_report.md"
@@ -77,7 +78,7 @@ SUMMARY_PATH="$REPORT_DIR/${RUN_TAG}_summary.md"
 mkdir -p "$OUTDIR"
 mkdir -p "$REPORT_DIR"
 
-echo "Running cached quantized NASA simulation with model: $EXPORT_JSON"
+echo "Running cached NASA true-int simulation with model: $EXPORT_JSON"
 echo "Output directory: $OUTDIR"
 
 "$GEM5_BIN" \
@@ -94,3 +95,4 @@ python3 scripts/collect_stats.py \
   --format md \
   --stats-section first \
   --title "gem5 report $RUN_TAG"
+

@@ -6,7 +6,6 @@ cd "$(dirname "$0")/.."
 BITS="${1:-16}"
 EXPORT_JSON="${2:-}"
 MAX_SAMPLES="${3:-128}"
-_UNUSED_LUT_SIZE="${4:-}"
 GEM5_ROOT="../gem5"
 M5OPS_RISCV_SRC="$GEM5_ROOT/util/m5/src/abi/riscv/m5op.S"
 
@@ -46,7 +45,7 @@ PREDICTIONS_CSV="${EXPORT_JSON%_export.json}_test_predictions.csv"
 
 mkdir -p build/riscv
 
-python3 scripts/json_to_quant_header.py "$EXPORT_JSON" --bits "$BITS"
+python3 scripts/json_to_true_int_header.py "$EXPORT_JSON" --bits "$BITS"
 if [[ -f "$PREDICTIONS_CSV" ]]; then
   python3 scripts/nasa_test_to_header.py --max-samples "$MAX_SAMPLES" --predictions "$PREDICTIONS_CSV"
 else
@@ -56,9 +55,10 @@ fi
 riscv64-linux-gnu-gcc -O2 -static -Wall -Wextra \
   -DKAN_ENABLE_GEM5_M5OPS=1 \
   -Iinclude -I"$GEM5_ROOT/include" \
-  src/nasa_quant_main.c src/kan_quant_inference.c \
+  src/nasa_true_int_main.c src/kan_true_int_inference.c \
   "$M5OPS_RISCV_SRC" \
   -lm \
-  -o "build/riscv/nasa_kan_demo_quant_int${BITS}_riscv"
+  -o "build/riscv/nasa_kan_demo_true_int${BITS}_riscv"
 
-echo "Built build/riscv/nasa_kan_demo_quant_int${BITS}_riscv"
+echo "Built build/riscv/nasa_kan_demo_true_int${BITS}_riscv"
+
