@@ -50,6 +50,13 @@ static inline int16_t kati_requantize_accumulator(int64_t acc) {
     return (int16_t)kati_clamp_int(shifted, -KATI_QMAX, KATI_QMAX);
 }
 
+static inline int16_t kati_control_point_at(const int16_t *restrict cp_q, int index) {
+    if (index < 0 || index >= KATI_NUM_CONTROL_POINTS) {
+        return 0;
+    }
+    return cp_q[index];
+}
+
 float kan_true_int_infer_vector(const float *restrict input) {
     int16_t current_q[KATI_MAX_LAYER_WIDTH] = {0};
     int16_t next_q[KATI_MAX_LAYER_WIDTH] = {0};
@@ -75,10 +82,10 @@ float kan_true_int_infer_vector(const float *restrict input) {
                 const int16_t *restrict cp_q = KATI_EDGE_CONTROL_POINTS_Q[edge_index];
 
                 int64_t spline_dot =
-                    (int64_t)basis_q15[0] * (int64_t)cp_q[first_cp + 0] +
-                    (int64_t)basis_q15[1] * (int64_t)cp_q[first_cp + 1] +
-                    (int64_t)basis_q15[2] * (int64_t)cp_q[first_cp + 2] +
-                    (int64_t)basis_q15[3] * (int64_t)cp_q[first_cp + 3];
+                    (int64_t)basis_q15[0] * (int64_t)kati_control_point_at(cp_q, first_cp + 0) +
+                    (int64_t)basis_q15[1] * (int64_t)kati_control_point_at(cp_q, first_cp + 1) +
+                    (int64_t)basis_q15[2] * (int64_t)kati_control_point_at(cp_q, first_cp + 2) +
+                    (int64_t)basis_q15[3] * (int64_t)kati_control_point_at(cp_q, first_cp + 3);
                 acc += spline_dot * KATI_EDGE_CONTROL_MUL[edge_index];
 
                 if (KATI_BASE_BRANCH_ENABLED) {

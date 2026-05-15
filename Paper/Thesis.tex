@@ -106,7 +106,7 @@ where $m_{i,j}$ is an optional edge mask,
 $s^{\mathrm{base}}_{i,j}$ and $s^{\mathrm{spline}}_{i,j}$ are learnable scale factors, 
 $b(\cdot)$ is a fixed base activation, and $S_{i,j}$ is the learnable spline component.
 
-\textbf{Base branch.}
+Base branch.
 The term
 \begin{equation}
     s^{\mathrm{base}}_{i,j} b(x_i)
@@ -125,7 +125,7 @@ For large positive inputs it behaves approximately like the identity, while for 
 In this context, the activation function is not applied after a whole layer.
 It is part of the edge function itself: it provides a stable low-complexity contribution, and the spline branch can then model more local corrections.
 
-\textbf{Spline branch.}
+Spline branch.
 The term
 \begin{equation}
     s^{\mathrm{spline}}_{i,j} S_{i,j}(x_i)
@@ -135,13 +135,13 @@ This is the flexible part of the edge function.
 The shape of $S_{i,j}$ is learned through B-spline coefficients, so different edges can represent different scalar functions.
 The scale $s^{\mathrm{spline}}_{i,j}$ controls the magnitude of this learned contribution.
 
-\textbf{Mask and scale factors.}
+Mask and scale factors.
 The two scale factors balance the two branches.
 If $s^{\mathrm{base}}_{i,j}$ is large, the edge relies more on the fixed SiLU response.
 If $s^{\mathrm{spline}}_{i,j}$ is large, the edge relies more on the learned spline shape.
 The mask $m_{i,j}$ acts as a gate on the whole edge: when it is zero, the edge contribution is removed; when it is one, the edge is active.
 
-\textbf{Initialization in the NASA model.}
+Initialization in the NASA model.
 For the NASA model used in this project, these quantities are initialized by the KAN library rather than manually overwritten by our training script.
 Since sparse initialization is not enabled, the mask is initialized to one for every edge and is not trainable.
 Therefore all edges start active and remain active in the exported NASA model.
@@ -432,65 +432,154 @@ An optimization that stores uniform knots compactly reduces static data.
 An optimization that places edge parameters contiguously can reduce cache traffic.
 All three choices are part of the same deployment problem.
 
-\section{Implementation Work to Be Expanded}
-\label{sec:implementations_placeholder}
+\section{Implemented Work}
+\label{sec:implemented_variants_quantization}
 
-\begin{itemize}
-    \item \textbf{Model export from training.}
-    The Python training code exports the learned KAN parameters into a format that can be translated into C headers and included in the gem5 inference binary.
+This section summarizes the implementation work carried out in the project.
+The common goal of these changes is to move from a trained Python KAN to several executable inference variants that can be evaluated inside gem5.
 
-    \item \textbf{Clean gem5 measurement.}
-    The inference executable separates initialization, optional warm-up, metric computation, and printing from the measured region.
-    The actual forward-pass loop is isolated with gem5 statistics reset and dump operations, so that the reported cycles, instructions, and cache events refer as closely as possible to inference only.
+\subsection{From Training Artifacts to C Headers}
 
-    \item \textbf{Compact knot representation.}
-    Uniform knot vectors do not need to be stored explicitly for every edge.
-    When their structure is regular, the inference code can reconstruct them from a small set of parameters.
+The first implemented step was the export path from training to inference.
+The KAN is trained in Python, but gem5 executes a RISC-V binary, so the learned model must be converted into a representation that C code can include directly.
+For this reason, the training code writes the learned parameters to a JSON export.
+The inference scripts then read this JSON file and generate static C headers containing the network dimensions, spline coefficients, knot information, scale factors, masks, and dataset samples.
 
-    \item \textbf{Local active B-spline evaluation.}
-    Since the project uses cubic splines, only four basis functions can be active for a given input value.
-    The optimized evaluator therefore finds the active knot interval and computes only the four local basis values needed by that interval, instead of combining all the control points of an edge.
+\subsection{Isolating the Inference Kernel in gem5}
 
-    \item \textbf{Coefficient layout by local interval.}
-    The natural mathematical layout stores all control points of an edge.
-    A more hardware-friendly layout stores the four coefficients required by each interval as a local \texttt{coeff4} packet, so that the kernel can load exactly the values used by the current spline segment.
+The inference program was also modified to isolate the cost of the forward pass.
+In a naive benchmark, gem5 statistics would include initialization, warm-up, printing, target comparison, and metric computation.
+Those operations are useful for checking correctness, but they are not the KAN inference kernel.
 
-    \item \textbf{Basis lookup table.}
-    Local basis values depend on the fractional position of the input inside the active interval, not on the specific edge.
-    A small lookup table can therefore store precomputed basis quadruples, reducing the amount of runtime spline arithmetic.
+The implemented flow separates these phases.
+The program performs setup first, optionally runs a small warm-up, resets gem5 statistics, executes only the inference loop, and then dumps the statistics before computing and printing the final metrics.
+This makes the reported cycles, instructions, and cache events much closer to the cost of the actual model evaluation.
 
-    \item \textbf{Memory layout of edge parameters.}
-    Coefficients, scale factors, and masks are arranged in flat arrays so that the edge evaluator can access them with simple index arithmetic and predictable memory behavior.
-    This layout also prepares the code for packed coefficient loads and for tiled execution.
+\subsection{Making Spline Evaluation Local}
 
-    \item \textbf{Quantization at multiple levels.}
-    Quantization is considered both on the training side and on the inference side.
-    The training pipeline can produce quantized model artifacts and the corresponding scale information, while the C inference code can execute quantized variants of the model.
-    The main variants are based on INT8 coefficients, INT8 or INT16 basis values, and INT32 accumulation.
+The floating-point C implementation was specialized for the structure used by the trained models.
+The project uses cubic splines, so for any input value at most four B-spline basis functions are active.
+Instead of evaluating and combining all basis functions of an edge, the optimized path finds the active interval and computes only the four local basis values.
+This reduces arithmetic work and also clarifies the future hardware direction: a cubic spline contribution naturally becomes a dot product between four basis values and four coefficients.
 
-    \item \textbf{Packed INT8 representation.}
-    Once only four coefficients and four basis values are needed, they can be packed into 32-bit words.
-    This representation reduces memory traffic and creates a direct mapping between cubic spline evaluation and packed integer arithmetic.
+The representation of the knot vectors was also improved.
+When knots are uniformly spaced, the full knot vector does not need to be stored repeatedly.
+It can be reconstructed from a base value and a spacing.
+This reduces static model data and makes the inference code more regular.
 
-    \item \textbf{Scalar \texttt{dot4} kernel.}
-    Before modifying the simulated processor, a pure C \texttt{dot4\_scalar} routine can validate the packed representation.
-    It unpacks four signed 8-bit coefficients and four signed 8-bit basis values from two 32-bit words and accumulates their products into an INT32 result.
+\subsection{Measuring the Role of the SiLU Branch}
 
-    \item \textbf{Custom \texttt{KAN.DOT4} instruction.}
-    The packed kernel motivates a RISC-V custom instruction that computes the four INT8 products and their sum in one operation.
-    In the intended design, one source register contains the packed coefficients, the other contains the packed basis values, and the destination register receives the accumulated dot product.
+The NASA model also allowed us to study the role of the two contributions inside each KAN edge.
+In this configuration, an edge is not made only of the spline function.
+It contains a spline branch and a base branch, where the base branch applies the SiLU activation and then scales its contribution through \texttt{scale\_base}.
+For this reason, removing the SiLU branch is not the same as disabling an edge mask.
+The mask would remove the entire edge, including the spline contribution.
+To isolate the effect of SiLU, we kept the masks unchanged and set \texttt{scale\_base} to zero on every edge, leaving the spline branch active.
 
-    \item \textbf{Scratchpad memory.}
-    A software-managed scratchpad can be added to the gem5 system as a memory-mapped region.
-    Compact data such as basis lookup tables, coefficient tiles, input tiles, and accumulation buffers can then be moved close to the core before running the kernel.
+This ablation showed that the SiLU branch is very important for the NASA model.
+With the original model, which includes both the spline and SiLU branches, the full test-set inference obtained an MAE of about $9.6$ and an MSE of about $191$.
+After disabling the SiLU branch, the MAE increased to about $104.5$ and the MSE to about $11812$.
+The execution became lighter, because the program no longer evaluated and accumulated the base activation contribution, but the prediction quality degraded dramatically.
+This result suggests that, at least for the NASA dataset, the SiLU branch is not a small auxiliary term: it carries a substantial part of the learned mapping together with the spline component.
 
-    \item \textbf{Tiled scratchpad execution and double buffering.}
-    After the scratchpad version is available, the computation can be organized in tiles.
-    Two scratchpad buffers can be alternated so that one tile is processed while the next tile is prepared, reducing the visible cost of data movement.
+\subsection{Quantization: From Real Values to Integer Codes}
 
-    \item \textbf{Batching of multiple inputs.}
-    Instead of evaluating one input sample at a time, the inference loop can process small batches.
-    This improves coefficient reuse across samples and can increase the arithmetic work performed per memory access, especially after the local, packed, and quantized kernels are in place.
-\end{itemize}
+Quantization represents real-valued parameters and activations using integer codes plus a scale factor.
+The integer stores a discrete code, while the scale tells how much real value one integer step represents.
+Together, the pair ``integer code + scale'' approximates the original real value.
+For this reason, the process is not a simple cast to \texttt{int8} or \texttt{int16}: each value is first divided by a scale, rounded to an integer, and limited to the range allowed by the chosen precision.
+
+For a real value $r$, the symmetric quantization rule used in this project is
+\begin{equation}
+    q =
+    \mathrm{clip}
+    \left(
+        \mathrm{round}
+        \left(
+            \frac{r}{s}
+        \right),
+        -q_{\max},
+        q_{\max}
+    \right).
+    \label{eq:quantize}
+\end{equation}
+Here, $q$ is the integer code, $s$ is the scale, and $q_{\max}$ is the largest positive integer allowed by the chosen precision.
+For signed INT8, $q_{\max}=127$.
+For signed INT16, $q_{\max}=32767$.
+The operation first divides the real value by the scale, then rounds it to the nearest integer, and finally clamps it so that it fits in the available integer range.
+
+As a simple example, assume that signed INT8 is used, so $q_{\max}=127$, and choose a scale $s=0.01$.
+A real value $r=0.37$ is represented as
+\begin{equation}
+    q = \mathrm{round}\left(\frac{0.37}{0.01}\right) = 37.
+\end{equation}
+The integer stored in memory is therefore $37$, not the floating-point value $0.37$.
+When the value is needed again, it is reconstructed as
+\begin{equation}
+    \hat{r} = 0.01 \cdot 37 = 0.37.
+\end{equation}
+If instead the value were $r=1.50$, the same scale would give $150$ before clamping.
+Since $150$ is outside the signed INT8 range, it would be clipped to $127$ and reconstructed as $1.27$.
+This shows the main trade-off: a small scale gives accurate steps, but values outside the representable range saturate.
+
+The approximate real value can be recovered as
+\begin{equation}
+    \hat{r} = s q.
+    \label{eq:dequantize}
+\end{equation}
+This recovered value $\hat{r}$ is not always exactly equal to the original $r$.
+The difference between them is the quantization error.
+A small scale gives fine precision, but it may saturate large values because the integer range is limited.
+A large scale covers larger values, but each integer step is wider and the approximation becomes coarser.
+Choosing the scale is therefore the central problem of quantization.
+
+In our implementation, quantization is applied after training.
+The NASA KAN is first trained in floating point and saved as a normal checkpoint.
+Then, a post-training quantization script reloads the checkpoint and converts the learned parameters into integer representations.
+This conversion is applied to the quantities that are fixed after training, such as the spline coefficients, \texttt{scale\_sp}, and \texttt{scale\_base}.
+
+Activations require a different treatment because they are not model parameters.
+A coefficient is known after training and can be quantized directly.
+An activation, instead, is created only while an input sample is being processed by the network.
+For example, the output of an internal KAN layer changes from one sample to another, so it is not available as a fixed array inside the checkpoint.
+
+For this reason, the quantization script performs a calibration pass before the final inference export.
+It runs representative training samples through the model and records the range of the intermediate activations.
+In this context, $a_{\max}$ denotes the largest absolute activation value observed for a given layer during calibration.
+It is computed as the maximum magnitude, not as the largest signed value:
+\begin{equation}
+    a_{\max} =
+    \max_{\mathrm{calibration}\ \mathrm{samples}} |a|.
+\end{equation}
+For example, if the observed activations of a layer range approximately from $-2.10$ to $1.80$, then $a_{\max}=2.10$.
+Once this value has been estimated, the activation scale is chosen as
+\begin{equation}
+    s_{\mathrm{act}} =
+    \frac{a_{\max}}{q_{\max}},
+\end{equation}
+where $q_{\max}$ depends on the selected precision.
+As a concrete example, with INT8 we have $q_{\max}=127$.
+If calibration observes $a_{\max}=2.54$, then $s_{\mathrm{act}}=2.54/127=0.02$.
+During inference, an activation equal to $1.00$ is represented by the integer code $50$, because $1.00/0.02=50$.
+The real value can later be approximated again as $50 \cdot 0.02 = 1.00$.
+Therefore, parameters and activations follow the same quantization idea, but their scales come from different sources: parameter scales come from the trained tensors, while activation scales come from calibration data.
+
+The complete flow can be summarized as follows.
+
+\begin{center}
+\begin{tabularx}{\textwidth}{@{}p{0.24\textwidth}p{0.28\textwidth}X@{}}
+\toprule
+Stage & Artifact & Role in inference \\
+\midrule
+Training & Floating-point checkpoint & The NASA KAN is trained in FP32. This is the reference model. \\
+FP32 JSON export & Floating-point JSON model & Stores floating-point coefficients, scales, masks, and normalization data. \\
+FP32 header & \texttt{kan\_model.h} & Generated from the FP32 export and included by the normal C inference path. \\
+Quantized JSON export & QuantKAN JSON model & Stores integer parameter codes, parameter scales, and activation calibration scales. \\
+Quantized header & \texttt{kan\_model\_quant.h} & Used by the quantized-dequantized C path: data are stored as integers but reconstructed and accumulated in floating point. \\
+True-integer header & \texttt{kan\_model\_true\_int.h} & Used by the true-integer C path: coefficients, activation codes, lookup tables, and requantization constants are arranged for integer arithmetic. \\
+Test-data header & \texttt{nasa\_test\_data.h} & Contains the selected NASA test inputs and reference targets used by the RISC-V executable. \\
+\bottomrule
+\end{tabularx}
+\end{center}
 
 \end{document}
