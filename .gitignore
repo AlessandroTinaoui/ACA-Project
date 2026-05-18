@@ -266,3 +266,4 @@ plots/*
 plots/model_metrics/metrics.csv
 !src_inference/model
 gem5
+src_inference/include/rul_test_data.h

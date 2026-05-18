@@ -1,0 +1,55 @@
+[data]
+train_csv_path = "../../datasets/NASA/processed/train_windows.csv"
+test_csv_path = "../../datasets/NASA/processed/test_windows.csv"
+target_column = "RUL"
+window_mode = "summary"
+window_size = 5
+summary_statistics = ["mean", "var", "trend"]
+x_train_npy_path = "../../datasets/NASA/processed/X_train.npy"
+y_train_npy_path = "../../datasets/NASA/processed/Y_train.npy"
+x_test_npy_path = "../../datasets/NASA/processed/X_test.npy"
+y_test_npy_path = "../../datasets/NASA/processed/Y_test.npy"
+target_scale = 125.0
+validation_size = 0.15
+random_seed = 42
+shuffle = true
+max_train_samples = 0
+max_test_samples = 0
+
+[model]
+hidden_layers = [16, 8]
+grid = 5
+k = 3
+noise_scale = 0.05
+symbolic_enabled = false
+auto_save = false
+device = "cpu"
+
+[training]
+epochs = 60
+batch_size = 64
+eval_batch_size = 256
+learning_rate = 0.001
+weight_decay = 0.00001
+grid_update_epochs = 0
+grid_update_every = 25
+patience = 10
+min_delta = 0.001
+log_every = 1
+optimizer = "adam"
+loss = "mse"
+huber_beta = 0.05
+monitor = "val_mae"
+
+[evaluation]
+rul_tolerance = 10.0
+
+[output]
+output_dir = "../../artifacts/nasa_kan"
+model_filename = "model.pt"
+export_json_filename = "nasa_kan_riscv_export.json"
+metrics_filename = "metrics.json"
+history_filename = "history.csv"
+predictions_filename = "test_predictions.csv"
+config_snapshot_filename = "config.toml"
+plot_filename = "training_history.png"
