@@ -1,1 +1,0 @@
-"""KAN experiments package."""
