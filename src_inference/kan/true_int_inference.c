@@ -10,6 +10,16 @@
 #define KATI_HAS_IOC_CONTROL_LAYOUT 0
 #endif
 
+#ifndef KATI_HAS_PACKED_I16_ARRAYS
+#define KATI_HAS_PACKED_I16_ARRAYS 0
+#endif
+
+#define KATI_USE_PACKED_I16 (KATI_HAS_IOC_CONTROL_LAYOUT && KATI_HAS_PACKED_I16_ARRAYS)
+
+#ifndef KATI_ENABLE_CUSTOM_DOT4
+#define KATI_ENABLE_CUSTOM_DOT4 0
+#endif
+
 static inline int kati_clamp_int(int value, int lower, int upper) {
     if (value < lower) {
         return lower;
@@ -74,6 +84,98 @@ static inline int64_t kati_dot4_i16(
         (int64_t)basis_q15[3] * (int64_t)coeff3;
 }
 
+#if KATI_USE_PACKED_I16
+static inline int16_t kati_unpack_i16_lane(uint64_t packed, int lane) {
+    return (int16_t)((packed >> (16 * lane)) & UINT64_C(0xFFFF));
+}
+
+static inline uint64_t kati_pack_i16x4(
+    int16_t lane0,
+    int16_t lane1,
+    int16_t lane2,
+    int16_t lane3) {
+    return
+        ((uint64_t)(uint16_t)lane0 << 0) |
+        ((uint64_t)(uint16_t)lane1 << 16) |
+        ((uint64_t)(uint16_t)lane2 << 32) |
+        ((uint64_t)(uint16_t)lane3 << 48);
+}
+
+static inline int64_t kati_dot4_packed_i16(uint64_t packed_basis_q15, uint64_t packed_coeff_q) {
+    return
+        (int64_t)kati_unpack_i16_lane(packed_basis_q15, 0) *
+            (int64_t)kati_unpack_i16_lane(packed_coeff_q, 0) +
+        (int64_t)kati_unpack_i16_lane(packed_basis_q15, 1) *
+            (int64_t)kati_unpack_i16_lane(packed_coeff_q, 1) +
+        (int64_t)kati_unpack_i16_lane(packed_basis_q15, 2) *
+            (int64_t)kati_unpack_i16_lane(packed_coeff_q, 2) +
+        (int64_t)kati_unpack_i16_lane(packed_basis_q15, 3) *
+            (int64_t)kati_unpack_i16_lane(packed_coeff_q, 3);
+}
+
+static inline int64_t kati_dot4_custom_i16(uint64_t packed_basis_q15, uint64_t packed_coeff_q) {
+#if defined(__riscv) && defined(__riscv_xlen) && (__riscv_xlen == 64)
+    uint64_t result = 0;
+    __asm__ volatile(
+        ".insn r 0x0b, 0x0, 0x00, %0, %1, %2"
+        : "=r"(result)
+        : "r"(packed_basis_q15), "r"(packed_coeff_q));
+    return (int64_t)result;
+#else
+    return kati_dot4_packed_i16(packed_basis_q15, packed_coeff_q);
+#endif
+}
+
+static inline int64_t kati_dot4_accel_i16(uint64_t packed_basis_q15, uint64_t packed_coeff_q) {
+#if KATI_ENABLE_CUSTOM_DOT4
+    return kati_dot4_custom_i16(packed_basis_q15, packed_coeff_q);
+#else
+    return kati_dot4_packed_i16(packed_basis_q15, packed_coeff_q);
+#endif
+}
+
+static inline uint64_t kati_control_word_at(int edge_word_base, int word_index) {
+    if (word_index < 0 || word_index >= KATI_CONTROL_PACKED_WORDS_PER_EDGE) {
+        return UINT64_C(0);
+    }
+    return KATI_EDGE_CONTROL_PACKED_Q[edge_word_base + word_index];
+}
+
+static inline int16_t kati_packed_control_point_at(int edge_word_base, int control_point) {
+    if (control_point < 0 || control_point >= KATI_NUM_CONTROL_POINTS) {
+        return 0;
+    }
+
+    const int word_index = control_point / KATI_PACKED_I16_LANES;
+    const int lane = control_point % KATI_PACKED_I16_LANES;
+    return kati_unpack_i16_lane(kati_control_word_at(edge_word_base, word_index), lane);
+}
+
+static inline uint64_t kati_load_packed_coeff4(int edge_index, int first_cp) {
+    const int edge_word_base = edge_index * KATI_CONTROL_PACKED_WORDS_PER_EDGE;
+
+    if (first_cp >= 0 && first_cp + KATI_NUM_LOCAL_BASIS <= KATI_NUM_CONTROL_POINTS) {
+        const int word_index = first_cp / KATI_PACKED_I16_LANES;
+        const int lane = first_cp % KATI_PACKED_I16_LANES;
+        const uint64_t lower = kati_control_word_at(edge_word_base, word_index);
+
+        if (lane == 0) {
+            return lower;
+        }
+
+        const uint64_t upper = kati_control_word_at(edge_word_base, word_index + 1);
+        const int shift = 16 * lane;
+        return (lower >> shift) | (upper << (64 - shift));
+    }
+
+    return kati_pack_i16x4(
+        kati_packed_control_point_at(edge_word_base, first_cp + 0),
+        kati_packed_control_point_at(edge_word_base, first_cp + 1),
+        kati_packed_control_point_at(edge_word_base, first_cp + 2),
+        kati_packed_control_point_at(edge_word_base, first_cp + 3));
+}
+#endif
+
 #if KATI_HAS_IOC_CONTROL_LAYOUT
 static inline int64_t kati_dot4_ioc_controls(
     const int16_t *restrict basis_q15,
@@ -109,15 +211,34 @@ float kan_true_int_infer_vector(const float *restrict input) {
         for (int input_index = 0; input_index < input_dim; ++input_index) {
             const int input_q = (int)current_q[input_index];
             const int lut_index = kati_basis_index(layer, input_q);
-            const int basis_offset = lut_index * KATI_NUM_LOCAL_BASIS;
             const int first_cp = (int)KATI_LAYER_BASIS_FIRST_CP[lut_index];
             const int edge_base = KATI_LAYER_EDGE_OFFSETS[layer] + input_index * output_dim;
+#if KATI_USE_PACKED_I16
+            const uint64_t packed_basis_q15 = KATI_LAYER_BASIS_PACKED_Q15[lut_index];
+#else
+            const int basis_offset = lut_index * KATI_NUM_LOCAL_BASIS;
             const int16_t *restrict basis_q15 = &KATI_LAYER_BASIS_Q15[basis_offset];
+#endif
 #if KATI_BASE_BRANCH_ENABLED
             const int16_t base_q = KATI_LAYER_BASE_LUT_Q[lut_index];
 #endif
 
 #if KATI_HAS_IOC_CONTROL_LAYOUT
+#if KATI_USE_PACKED_I16
+            for (int output_index = 0; output_index < output_dim; ++output_index) {
+                const int edge_index = edge_base + output_index;
+                const uint64_t packed_coeff_q = kati_load_packed_coeff4(edge_index, first_cp);
+                const int64_t spline_dot = kati_dot4_accel_i16(packed_basis_q15, packed_coeff_q);
+                acc[output_index] += spline_dot * KATI_EDGE_CONTROL_MUL[edge_index];
+
+#if KATI_BASE_BRANCH_ENABLED
+                acc[output_index] +=
+                    (int64_t)base_q *
+                    (int64_t)KATI_EDGE_SCALE_BASE_Q[edge_index] *
+                    KATI_EDGE_SCALE_BASE_MUL[edge_index];
+#endif
+            }
+#else
             const int control_base = edge_base * KATI_NUM_CONTROL_POINTS;
 
             for (int output_index = 0; output_index < output_dim; ++output_index) {
@@ -134,6 +255,7 @@ float kan_true_int_infer_vector(const float *restrict input) {
                     KATI_EDGE_SCALE_BASE_MUL[edge_index];
 #endif
             }
+#endif
 #else
             for (int output_index = 0; output_index < output_dim; ++output_index) {
                 const int edge_index = edge_base + output_index;

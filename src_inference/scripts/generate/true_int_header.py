@@ -78,6 +78,14 @@ def format_1d_i64_array(values: list[int], indent: str, chunk_size: int = 8) -> 
     return ",\n".join(lines) if lines else indent + "0LL"
 
 
+def format_1d_u64_array(values: list[int], indent: str, chunk_size: int = 4) -> str:
+    lines = []
+    for index in range(0, len(values), chunk_size):
+        chunk = values[index : index + chunk_size]
+        lines.append(indent + ", ".join(f"UINT64_C(0x{int(value):016x})" for value in chunk))
+    return ",\n".join(lines) if lines else indent + "UINT64_C(0)"
+
+
 def format_1d_float_array(values: list[float], indent: str, chunk_size: int = 8) -> str:
     lines = []
     for index in range(0, len(values), chunk_size):
@@ -182,6 +190,37 @@ def all_close(values: list[float], reference: float, tolerance: float = 1e-7) ->
     return all(abs(value - reference) <= tolerance for value in values)
 
 
+def pack_i16x4(values: list[int]) -> int:
+    if len(values) > 4:
+        raise ValueError(f"Cannot pack more than four int16 values, got {len(values)}.")
+    packed = 0
+    for lane, value in enumerate(values + [0] * (4 - len(values))):
+        if value < -32768 or value > 32767:
+            raise ValueError(f"Packed int16 value out of range: {value}")
+        packed |= (int(value) & 0xFFFF) << (16 * lane)
+    return packed
+
+
+def pack_i16x4_groups(values: list[int], group_size: int) -> list[int]:
+    if group_size <= 0:
+        raise ValueError("group_size must be positive.")
+    packed_words_per_group = (group_size + 3) // 4
+    if len(values) % group_size != 0:
+        raise ValueError(
+            f"Cannot pack {len(values)} values into groups of {group_size}; length is not divisible."
+        )
+
+    packed: list[int] = []
+    num_groups = len(values) // group_size
+    for group_index in range(num_groups):
+        group_start = group_index * group_size
+        for word_index in range(packed_words_per_group):
+            start = group_start + word_index * 4
+            end = min(start + 4, group_start + group_size)
+            packed.append(pack_i16x4(values[start:end]))
+    return packed
+
+
 def main() -> None:
     args = parse_args()
     if args.bits not in {8, 16}:
@@ -259,6 +298,7 @@ def main() -> None:
                 value = basis[cp_index] if cp_index < num_control_points else 0.0
                 basis_q15.append(max(-basis_qmax, min(basis_qmax, int(round(value * basis_qmax)))))
             base_lut_q.append(quantize_symmetric(silu(x), base_scale, qmax))
+    basis_packed_q15 = pack_i16x4_groups(basis_q15, 4)
 
     edge_offsets: list[int] = []
     edge_control_points_ioc_q: list[int] = []
@@ -296,6 +336,8 @@ def main() -> None:
                 base_real_scale = base_value_scale[layer_index] * base_weight_scale
                 base_mul = int(round((base_real_scale / output_steps[layer_index]) * (1 << REQUIANT_SHIFT))) if output_steps[layer_index] > 0.0 else 0
                 edge_scale_base_mul.append(base_mul)
+    control_packed_words_per_edge = (num_control_points + 3) // 4
+    edge_control_packed_q = pack_i16x4_groups(edge_control_points_ioc_q, num_control_points)
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(
@@ -332,11 +374,15 @@ def main() -> None:
 #define KATI_QMAX {qmax}
 #define KATI_NUM_LOCAL_BASIS 4
 #define KATI_BASIS_LUT_ENTRIES {basis_lut_entries}
+#define KATI_PACKED_I16_LANES 4
+#define KATI_CONTROL_PACKED_WORDS_PER_EDGE {control_packed_words_per_edge}
 #define KATI_REQUANT_SHIFT {REQUIANT_SHIFT}
 #define KATI_REQUANT_ROUND {(1 << (REQUIANT_SHIFT - 1))}
 #define KATI_BASE_BRANCH_ENABLED {0 if all_close(edge_scale_base_mul, 0.0) else 1}
 #define KATI_HAS_IOC_CONTROL_LAYOUT 1
+#define KATI_HAS_PACKED_I16_ARRAYS 1
 /* KATI_EDGE_CONTROL_POINTS_IOC_Q layout: input -> output -> control. */
+/* Packed int16 lane order: lane 0 is stored in bits [15:0]. */
 
 static const float KATI_TARGET_SCALE = {c_float(target_scale)};
 static const float KATI_FINAL_OUTPUT_STEP = {c_float(final_output_step)};
@@ -373,6 +419,10 @@ static const int16_t KATI_LAYER_BASIS_Q15[KATI_NUM_LAYERS * KATI_BASIS_LUT_ENTRI
 {format_1d_int_array(basis_q15, "    ", chunk_size=24)}
 }};
 
+static const uint64_t KATI_LAYER_BASIS_PACKED_Q15[KATI_NUM_LAYERS * KATI_BASIS_LUT_ENTRIES] KATI_ALIGN_64 = {{
+{format_1d_u64_array(basis_packed_q15, "    ")}
+}};
+
 static const int16_t KATI_LAYER_BASIS_FIRST_CP[KATI_NUM_LAYERS * KATI_BASIS_LUT_ENTRIES] KATI_ALIGN_64 = {{
 {format_1d_int_array(basis_first_cp, "    ", chunk_size=24)}
 }};
@@ -383,6 +433,10 @@ static const int16_t KATI_LAYER_BASE_LUT_Q[KATI_NUM_LAYERS * KATI_BASIS_LUT_ENTR
 
 static const int16_t KATI_EDGE_CONTROL_POINTS_IOC_Q[KATI_NUM_EDGES * KATI_NUM_CONTROL_POINTS] KATI_ALIGN_64 = {{
 {format_1d_int_array(edge_control_points_ioc_q, "    ", chunk_size=24)}
+}};
+
+static const uint64_t KATI_EDGE_CONTROL_PACKED_Q[KATI_NUM_EDGES * KATI_CONTROL_PACKED_WORDS_PER_EDGE] KATI_ALIGN_64 = {{
+{format_1d_u64_array(edge_control_packed_q, "    ")}
 }};
 
 static const int64_t KATI_EDGE_CONTROL_MUL[KATI_NUM_EDGES] KATI_ALIGN_64 = {{
