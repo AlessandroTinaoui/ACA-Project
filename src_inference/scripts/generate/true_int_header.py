@@ -25,6 +25,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("model", nargs="?", default="true_int16")
     parser.add_argument("--bits", type=int, default=16)
+    parser.add_argument("--basis-lut-addr-bits", type=int, default=12)
     parser.add_argument("--output", type=Path, default=HEADER_PATH)
     return parser.parse_args()
 
@@ -137,32 +138,19 @@ def quantize_symmetric(value: float, scale: float, qmax: int) -> int:
     return max(-qmax, min(qmax, quantized))
 
 
-def bspline_basis_values(x: float, knots: list[float], degree: int, num_control_points: int) -> list[float]:
-    if x >= knots[-1]:
-        x = math.nextafter(knots[-1], knots[0])
+def cubic_bspline_beta(t: float) -> float:
+    abs_t = abs(t)
+    if abs_t < 1.0:
+        return (2.0 / 3.0) - (abs_t * abs_t) + (abs_t * abs_t * abs_t * 0.5)
+    if abs_t < 2.0:
+        distance = 2.0 - abs_t
+        return (distance * distance * distance) / 6.0
+    return 0.0
 
-    num_intervals = len(knots) - 1
-    prev = [0.0] * num_intervals
-    for index in range(num_intervals):
-        if knots[index] <= x < knots[index + 1]:
-            prev[index] = 1.0
 
-    for order in range(1, degree + 1):
-        curr = [0.0] * num_intervals
-        for index in range(num_intervals - order):
-            left = 0.0
-            left_den = knots[index + order] - knots[index]
-            if left_den > 0.0:
-                left = ((x - knots[index]) / left_den) * prev[index]
-
-            right = 0.0
-            right_den = knots[index + order + 1] - knots[index + 1]
-            if right_den > 0.0:
-                right = ((knots[index + order + 1] - x) / right_den) * prev[index + 1]
-            curr[index] = left + right
-        prev = curr
-
-    return prev[:num_control_points]
+def quantize_basis_q15(value: float, qmax: int) -> int:
+    quantized = int(round(value * qmax))
+    return max(0, min(qmax, quantized))
 
 
 def companion_predictions(export_json: Path) -> Path:
@@ -225,6 +213,8 @@ def main() -> None:
     args = parse_args()
     if args.bits not in {8, 16}:
         raise ValueError("--bits must be 8 or 16")
+    if args.basis_lut_addr_bits < 1 or args.basis_lut_addr_bits > 20:
+        raise ValueError("--basis-lut-addr-bits must be between 1 and 20")
 
     export_json = resolve_model_path(args.model)
     data = json.loads(export_json.read_text(encoding="utf-8"))
@@ -243,6 +233,7 @@ def main() -> None:
     max_layer_width = max(width)
     qmax = (1 << (args.bits - 1)) - 1
     basis_qmax = 32767
+    position_frac_bits = 30
     layer_input_dims = [int(layer["input_dim"]) for layer in layers]
     layer_output_dims = [int(layer["output_dim"]) for layer in layers]
     num_edges = sum(layer_input_dims[index] * layer_output_dims[index] for index in range(num_layers))
@@ -251,10 +242,11 @@ def main() -> None:
     final_output_amax = load_final_output_amax(export_json, target_scale)
     final_output_step = final_output_amax / float(qmax)
     output_steps = [layer_input_step[index + 1] if index + 1 < num_layers else final_output_step for index in range(num_layers)]
+    if degree != 3:
+        raise ValueError("The true-int basis LUT path supports only cubic B-splines (degree = 3).")
 
-    common_knots: list[list[float]] = []
-    layer_knot_base: list[float] = []
-    layer_knot_inv_delta: list[float] = []
+    layer_position_scale_q: list[int] = []
+    layer_position_offset_q: list[int] = []
     for layer_index, layer in enumerate(layers):
         active_knots = [[float(value) for value in row] for row in layer["knots"][: layer_input_dims[layer_index]]]
         if not active_knots:
@@ -267,20 +259,29 @@ def main() -> None:
                 raise ValueError(
                     f"Layer {layer_index}: active inputs use different uniform knot grids; true-int path expects a shared grid."
                 )
-        common_knots.append(reference)
-        layer_knot_base.append(reference[0])
         delta = reference[1] - reference[0]
-        layer_knot_inv_delta.append(1.0 / delta if delta != 0.0 else 0.0)
+        inv_delta = 1.0 / delta if delta != 0.0 else 0.0
+        position_scale = layer_input_step[layer_index] * inv_delta
+        position_offset = -reference[0] * inv_delta
+        layer_position_scale_q.append(int(round(position_scale * float(1 << position_frac_bits))))
+        layer_position_offset_q.append(int(round(position_offset * float(1 << position_frac_bits))))
 
-    basis_lut_entries = 2 * qmax + 1
-    basis_first_cp: list[int] = []
-    basis_q15: list[int] = []
+    basis_lut_addr_bits = args.basis_lut_addr_bits
+    basis_lut_entries = 1 << basis_lut_addr_bits
+    basis_lut_max_addr = basis_lut_entries - 1
+    basis_lut0_q15: list[int] = []
+    basis_lut1_q15: list[int] = []
+    for addr in range(basis_lut_entries):
+        u = float(addr) / float(basis_lut_max_addr)
+        basis_lut0_q15.append(quantize_basis_q15(cubic_bspline_beta(u), basis_qmax))
+        basis_lut1_q15.append(quantize_basis_q15(cubic_bspline_beta(1.0 + u), basis_qmax))
+
+    base_lut_entries = 2 * qmax + 1
     base_lut_q: list[int] = []
     base_value_scale: list[float] = []
     for layer_index in range(num_layers):
         amax = layer_input_amax[layer_index]
         step = layer_input_step[layer_index]
-        knots = common_knots[layer_index]
         max_abs_base = max(abs(silu(-amax)), abs(silu(amax)))
         if max_abs_base <= 0.0:
             max_abs_base = 1.0
@@ -289,16 +290,7 @@ def main() -> None:
 
         for code in range(-qmax, qmax + 1):
             x = float(code) * step
-            basis = bspline_basis_values(x, knots, degree, num_control_points)
-            active = [idx for idx, value in enumerate(basis) if abs(value) > 1e-10]
-            first_cp = active[0] if active else 0
-            basis_first_cp.append(first_cp)
-            for local_index in range(4):
-                cp_index = first_cp + local_index
-                value = basis[cp_index] if cp_index < num_control_points else 0.0
-                basis_q15.append(max(-basis_qmax, min(basis_qmax, int(round(value * basis_qmax)))))
             base_lut_q.append(quantize_symmetric(silu(x), base_scale, qmax))
-    basis_packed_q15 = pack_i16x4_groups(basis_q15, 4)
 
     edge_offsets: list[int] = []
     edge_control_points_ioc_q: list[int] = []
@@ -356,6 +348,7 @@ def main() -> None:
  * Auto-generated by scripts/generate/true_int_header.py.
  * Source JSON: {export_json}
  * Quant bits: {args.bits}
+ * Basis LUT address bits: {basis_lut_addr_bits}
  * Do not edit this file by hand.
  */
 
@@ -373,7 +366,14 @@ def main() -> None:
 #define KATI_BITS {args.bits}
 #define KATI_QMAX {qmax}
 #define KATI_NUM_LOCAL_BASIS 4
-#define KATI_BASIS_LUT_ENTRIES {basis_lut_entries}
+#define KATI_BASIS_QMAX {basis_qmax}
+#define KATI_BASIS_LUT_ADDR_BITS {basis_lut_addr_bits}
+#define KATI_BASIS_LUT_ENTRIES (1 << KATI_BASIS_LUT_ADDR_BITS)
+#define KATI_BASIS_LUT_MAX_ADDR (KATI_BASIS_LUT_ENTRIES - 1)
+#define KATI_BASE_LUT_ENTRIES {base_lut_entries}
+#define KATI_POSITION_FRAC_BITS {position_frac_bits}
+#define KATI_POSITION_FRAC_ONE (1LL << KATI_POSITION_FRAC_BITS)
+#define KATI_POSITION_FRAC_MASK (KATI_POSITION_FRAC_ONE - 1LL)
 #define KATI_PACKED_I16_LANES 4
 #define KATI_CONTROL_PACKED_WORDS_PER_EDGE {control_packed_words_per_edge}
 #define KATI_REQUANT_SHIFT {REQUIANT_SHIFT}
@@ -407,27 +407,23 @@ static const float KATI_LAYER_INPUT_STEP[KATI_NUM_LAYERS] = {{
 {format_1d_float_array(layer_input_step, "    ")}
 }};
 
-static const float KATI_LAYER_KNOT_BASE[KATI_NUM_LAYERS] = {{
-{format_1d_float_array(layer_knot_base, "    ")}
+static const int64_t KATI_LAYER_POSITION_SCALE_Q[KATI_NUM_LAYERS] = {{
+{format_1d_i64_array(layer_position_scale_q, "    ")}
 }};
 
-static const float KATI_LAYER_KNOT_INV_DELTA[KATI_NUM_LAYERS] = {{
-{format_1d_float_array(layer_knot_inv_delta, "    ")}
+static const int64_t KATI_LAYER_POSITION_OFFSET_Q[KATI_NUM_LAYERS] = {{
+{format_1d_i64_array(layer_position_offset_q, "    ")}
 }};
 
-static const int16_t KATI_LAYER_BASIS_Q15[KATI_NUM_LAYERS * KATI_BASIS_LUT_ENTRIES * KATI_NUM_LOCAL_BASIS] KATI_ALIGN_64 = {{
-{format_1d_int_array(basis_q15, "    ", chunk_size=24)}
+static const int16_t KATI_BASIS_LUT0_Q15[KATI_BASIS_LUT_ENTRIES] KATI_ALIGN_64 = {{
+{format_1d_int_array(basis_lut0_q15, "    ", chunk_size=24)}
 }};
 
-static const uint64_t KATI_LAYER_BASIS_PACKED_Q15[KATI_NUM_LAYERS * KATI_BASIS_LUT_ENTRIES] KATI_ALIGN_64 = {{
-{format_1d_u64_array(basis_packed_q15, "    ")}
+static const int16_t KATI_BASIS_LUT1_Q15[KATI_BASIS_LUT_ENTRIES] KATI_ALIGN_64 = {{
+{format_1d_int_array(basis_lut1_q15, "    ", chunk_size=24)}
 }};
 
-static const int16_t KATI_LAYER_BASIS_FIRST_CP[KATI_NUM_LAYERS * KATI_BASIS_LUT_ENTRIES] KATI_ALIGN_64 = {{
-{format_1d_int_array(basis_first_cp, "    ", chunk_size=24)}
-}};
-
-static const int16_t KATI_LAYER_BASE_LUT_Q[KATI_NUM_LAYERS * KATI_BASIS_LUT_ENTRIES] KATI_ALIGN_64 = {{
+static const int16_t KATI_LAYER_BASE_LUT_Q[KATI_NUM_LAYERS * KATI_BASE_LUT_ENTRIES] KATI_ALIGN_64 = {{
 {format_1d_int_array(base_lut_q, "    ", chunk_size=24)}
 }};
 

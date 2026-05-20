@@ -48,15 +48,15 @@ static inline int kati_quantize_float_to_q(float value, float step) {
     return kati_clamp_int(quantized, -KATI_QMAX, KATI_QMAX);
 }
 
-static inline int kati_basis_index(int layer, int input_q) {
+static inline int kati_base_lut_index(int layer, int input_q) {
     const int index = input_q + KATI_QMAX;
     if (index < 0) {
-        return layer * KATI_BASIS_LUT_ENTRIES;
+        return layer * KATI_BASE_LUT_ENTRIES;
     }
-    if (index >= KATI_BASIS_LUT_ENTRIES) {
-        return layer * KATI_BASIS_LUT_ENTRIES + (KATI_BASIS_LUT_ENTRIES - 1);
+    if (index >= KATI_BASE_LUT_ENTRIES) {
+        return layer * KATI_BASE_LUT_ENTRIES + (KATI_BASE_LUT_ENTRIES - 1);
     }
-    return layer * KATI_BASIS_LUT_ENTRIES + index;
+    return layer * KATI_BASE_LUT_ENTRIES + index;
 }
 
 static inline int16_t kati_requantize_accumulator(int64_t acc) {
@@ -195,6 +195,56 @@ static inline int64_t kati_dot4_ioc_controls(
 }
 #endif
 
+typedef struct {
+    int first_control_point;
+    int addr;
+} KatiBasisAddress;
+
+static inline int kati_make_basis_address(int layer, int input_q, KatiBasisAddress *restrict basis) {
+    const int64_t position_q =
+        (int64_t)input_q * KATI_LAYER_POSITION_SCALE_Q[layer] +
+        KATI_LAYER_POSITION_OFFSET_Q[layer];
+    if (position_q < 0) {
+        return 0;
+    }
+
+    const int span = (int)(position_q >> KATI_POSITION_FRAC_BITS);
+    if (span >= KATI_NUM_KNOTS - 1) {
+        return 0;
+    }
+
+    const int64_t frac_q = position_q & KATI_POSITION_FRAC_MASK;
+    const int64_t addr_q =
+        frac_q * (int64_t)KATI_BASIS_LUT_MAX_ADDR +
+        (KATI_POSITION_FRAC_ONE >> 1);
+    const int addr = (int)(addr_q >> KATI_POSITION_FRAC_BITS);
+
+    basis->first_control_point = span - KATI_DEGREE;
+    basis->addr = kati_clamp_int(addr, 0, KATI_BASIS_LUT_MAX_ADDR);
+    return 1;
+}
+
+static inline void kati_load_basis_q15(int addr, int16_t *restrict basis_q15) {
+    const int addr_m = KATI_BASIS_LUT_MAX_ADDR - addr;
+
+    basis_q15[0] = KATI_BASIS_LUT1_Q15[addr];
+    basis_q15[1] = KATI_BASIS_LUT0_Q15[addr];
+    basis_q15[2] = KATI_BASIS_LUT0_Q15[addr_m];
+    basis_q15[3] = KATI_BASIS_LUT1_Q15[addr_m];
+}
+
+#if KATI_USE_PACKED_I16
+static inline uint64_t kati_load_packed_basis_q15(int addr) {
+    const int addr_m = KATI_BASIS_LUT_MAX_ADDR - addr;
+
+    return kati_pack_i16x4(
+        KATI_BASIS_LUT1_Q15[addr],
+        KATI_BASIS_LUT0_Q15[addr],
+        KATI_BASIS_LUT0_Q15[addr_m],
+        KATI_BASIS_LUT1_Q15[addr_m]);
+}
+#endif
+
 float kan_true_int_infer_vector(const float *restrict input) {
     int16_t current_q[KATI_MAX_LAYER_WIDTH] = {0};
     int16_t next_q[KATI_MAX_LAYER_WIDTH] = {0};
@@ -210,26 +260,33 @@ float kan_true_int_infer_vector(const float *restrict input) {
 
         for (int input_index = 0; input_index < input_dim; ++input_index) {
             const int input_q = (int)current_q[input_index];
-            const int lut_index = kati_basis_index(layer, input_q);
-            const int first_cp = (int)KATI_LAYER_BASIS_FIRST_CP[lut_index];
             const int edge_base = KATI_LAYER_EDGE_OFFSETS[layer] + input_index * output_dim;
+            KatiBasisAddress basis = {0};
+            const int has_spline = kati_make_basis_address(layer, input_q, &basis);
 #if KATI_USE_PACKED_I16
-            const uint64_t packed_basis_q15 = KATI_LAYER_BASIS_PACKED_Q15[lut_index];
+            const uint64_t packed_basis_q15 =
+                has_spline ? kati_load_packed_basis_q15(basis.addr) : UINT64_C(0);
 #else
-            const int basis_offset = lut_index * KATI_NUM_LOCAL_BASIS;
-            const int16_t *restrict basis_q15 = &KATI_LAYER_BASIS_Q15[basis_offset];
+            int16_t basis_q15[KATI_NUM_LOCAL_BASIS] = {0};
+            if (has_spline) {
+                kati_load_basis_q15(basis.addr, basis_q15);
+            }
 #endif
 #if KATI_BASE_BRANCH_ENABLED
-            const int16_t base_q = KATI_LAYER_BASE_LUT_Q[lut_index];
+            const int base_lut_index = kati_base_lut_index(layer, input_q);
+            const int16_t base_q = KATI_LAYER_BASE_LUT_Q[base_lut_index];
 #endif
 
 #if KATI_HAS_IOC_CONTROL_LAYOUT
 #if KATI_USE_PACKED_I16
             for (int output_index = 0; output_index < output_dim; ++output_index) {
                 const int edge_index = edge_base + output_index;
-                const uint64_t packed_coeff_q = kati_load_packed_coeff4(edge_index, first_cp);
-                const int64_t spline_dot = kati_dot4_accel_i16(packed_basis_q15, packed_coeff_q);
-                acc[output_index] += spline_dot * KATI_EDGE_CONTROL_MUL[edge_index];
+                if (has_spline) {
+                    const uint64_t packed_coeff_q =
+                        kati_load_packed_coeff4(edge_index, basis.first_control_point);
+                    const int64_t spline_dot = kati_dot4_accel_i16(packed_basis_q15, packed_coeff_q);
+                    acc[output_index] += spline_dot * KATI_EDGE_CONTROL_MUL[edge_index];
+                }
 
 #if KATI_BASE_BRANCH_ENABLED
                 acc[output_index] +=
@@ -245,8 +302,11 @@ float kan_true_int_infer_vector(const float *restrict input) {
                 const int edge_index = edge_base + output_index;
                 const int16_t *restrict control_q =
                     &KATI_EDGE_CONTROL_POINTS_IOC_Q[control_base + output_index * KATI_NUM_CONTROL_POINTS];
-                const int64_t spline_dot = kati_dot4_ioc_controls(basis_q15, control_q, first_cp);
-                acc[output_index] += spline_dot * KATI_EDGE_CONTROL_MUL[edge_index];
+                if (has_spline) {
+                    const int64_t spline_dot =
+                        kati_dot4_ioc_controls(basis_q15, control_q, basis.first_control_point);
+                    acc[output_index] += spline_dot * KATI_EDGE_CONTROL_MUL[edge_index];
+                }
 
 #if KATI_BASE_BRANCH_ENABLED
                 acc[output_index] +=
@@ -259,13 +319,16 @@ float kan_true_int_infer_vector(const float *restrict input) {
 #else
             for (int output_index = 0; output_index < output_dim; ++output_index) {
                 const int edge_index = edge_base + output_index;
-                const int64_t spline_dot = kati_dot4_i16(
-                    basis_q15,
-                    kati_control_point_at(KATI_EDGE_CONTROL_POINTS_Q[edge_index], first_cp + 0),
-                    kati_control_point_at(KATI_EDGE_CONTROL_POINTS_Q[edge_index], first_cp + 1),
-                    kati_control_point_at(KATI_EDGE_CONTROL_POINTS_Q[edge_index], first_cp + 2),
-                    kati_control_point_at(KATI_EDGE_CONTROL_POINTS_Q[edge_index], first_cp + 3));
-                acc[output_index] += spline_dot * KATI_EDGE_CONTROL_MUL[edge_index];
+                if (has_spline) {
+                    const int first_cp = basis.first_control_point;
+                    const int64_t spline_dot = kati_dot4_i16(
+                        basis_q15,
+                        kati_control_point_at(KATI_EDGE_CONTROL_POINTS_Q[edge_index], first_cp + 0),
+                        kati_control_point_at(KATI_EDGE_CONTROL_POINTS_Q[edge_index], first_cp + 1),
+                        kati_control_point_at(KATI_EDGE_CONTROL_POINTS_Q[edge_index], first_cp + 2),
+                        kati_control_point_at(KATI_EDGE_CONTROL_POINTS_Q[edge_index], first_cp + 3));
+                    acc[output_index] += spline_dot * KATI_EDGE_CONTROL_MUL[edge_index];
+                }
 
 #if KATI_BASE_BRANCH_ENABLED
                 acc[output_index] +=

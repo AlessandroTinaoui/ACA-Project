@@ -8,7 +8,7 @@ NASA_QUANT_W_BITS ?= 16
 NASA_QUANT_A_BITS ?= 16
 NASA_NUM_INPUTS ?= 0
 
-.PHONY: help install nasa nasa-quant nasa-gem5 nasa-quant-gem5 nasa-true-int nasa-suite clean
+.PHONY: help install nasa nasa-quant nasa-gem5 nasa-quant-gem5 nasa-true-int nasa-suite clean data-cleanup
 
 help:
 	@printf "%s\n" \
@@ -20,7 +20,8 @@ help:
 	"nasa-quant-gem5          Run NASA PTQ on gem5" \
 	"nasa-true-int            Run the NASA true-int gem5 path" \
 	"nasa-suite               Run fp32, PTQ, and true-int NASA gem5 comparisons" \
-	"clean                    Clean src_inference build/results outputs" \
+	"clean                    Clean Python bytecode caches" \
+	"data-cleanup             Clean src_inference build/results/generated headers" \
 	"" \
 	"Options:" \
 	"PYTHON=python3           Python interpreter used for training targets" \
@@ -63,7 +64,8 @@ nasa-suite:
 	bash src_inference/scripts/run/suite.sh $(NASA_CONFIG) $(NASA_NUM_INPUTS)
 
 clean:
-	rm -rf src_inference/build src_inference/results src_inference/simulation_metrics
-	rm -f src_inference/include/kan_model.h src_inference/include/kan_model_quant.h src_inference/include/kan_model_true_int.h src_inference/include/rul_test_data.h src_inference/include/test_data.h
 	find src_train src_inference -type d -name "__pycache__" -exec rm -rf {} +
 	find src_train src_inference -type f \( -name "*.pyc" -o -name "*.pyo" \) -delete
+data-cleanup:
+	rm -rf src_inference/build src_inference/results src_inference/simulation_metrics
+	rm -f src_inference/include/kan_model.h src_inference/include/kan_model_quant.h src_inference/include/kan_model_true_int.h src_inference/include/kan_model_true_int_lut.h src_inference/include/rul_test_data.h src_inference/include/test_data.h

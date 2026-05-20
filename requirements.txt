@@ -8,3 +8,4 @@ PyYAML
 scikit-learn
 torch
 tqdm
+optuna
